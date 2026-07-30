@@ -2,7 +2,7 @@
 
 This repository provides the following add-ons for Home Assistant:
 
-- [Swiss Meteo Shade](swiss_meteo_shade/README.md) — weather-driven awning &
+- [Swiss Meteo Shade](swiss_meteo_shade/) — weather-driven awning &
   blind automation from MeteoSwiss open data (Switzerland only)
 
 ## Installation
