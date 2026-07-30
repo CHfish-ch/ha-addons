@@ -198,14 +198,18 @@ the problem and 0.1 is correct.
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
+- `CHANGELOG.md` exists and is shown in the Supervisor's Changelog tab. Bump
+  `version` (in `config.yaml` and the Dockerfile `LABEL`) and add an entry here
+  together, in the same commit, every time — see "Version currently lives in
+  three places" below.
 
 ## Hard-won operational lessons
 
 - **The add-on folder name must equal the slug** (see Repository layout). A
   folder named `swiss-meteo-shade` against slug `swiss_meteo_shade` installs and
   runs fine but the Supervisor won't load `translations/en.yaml`, and the config
-  screen silently shows raw keys. This cost a long debug session; the nested
-  layout now prevents it, but don't rename the directory.
+  screen silently shows raw keys. This cost a long debug session — don't rename
+  the `swiss_meteo_shade/` directory without also updating `config.yaml`'s `slug`.
 - **Removing an entity from the code does not remove it from Home Assistant.**
   MQTT discovery configs are retained. Clear them by publishing an empty retained
   payload to `homeassistant/<domain>/sms_<slug>/config`. Uninstalling the add-on
@@ -243,9 +247,11 @@ external dependencies.
 - No overall cycle budget; pathological cycles could exceed the interval.
 - Radar re-downloads two already-seen frames each cycle (a 3-entry cache would
   cut radar traffic by two-thirds).
-- Packaging, only if publishing: `build.yaml` with `ARG BUILD_FROM`,
-  `repository.yaml`, CHANGELOG, CI running the test suites. Version currently
-  lives in three places.
+- Packaging: `build.yaml` with `ARG BUILD_FROM` and CI running the test suites
+  are still open. `repository.yaml` and `CHANGELOG.md` are done. Version still
+  lives in three places (`config.yaml`, the Dockerfile `LABEL`, and the "What
+  it is" section above) with nothing automated keeping them in sync — bump all
+  three by hand together.
 - HA polish: `device_class` on numeric sensors (`wind_speed`, `temperature`,
   `duration`), `enum` on the recommendation sensor, per-entity icons.
 - A `de.yaml` translation (Swiss German: `ss` not `ß`, dot as decimal separator).
