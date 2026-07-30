@@ -8,8 +8,9 @@ correct.
 ## Repository layout
 
 ```
-<repo root>/
-├── swiss_meteo_shade/       THE ADD-ON — copy this whole folder to /addons/
+<repo root>/                  = https://github.com/CHfish-ch/ha-addons (public)
+├── repository.yaml          name/url/maintainer shown in the Add-on Store
+├── swiss_meteo_shade/       THE ADD-ON — one top-level folder per add-on in this repo
 │   ├── config.yaml          manifest, 17 options
 │   ├── Dockerfile           COPY paths are relative to this dir; no change needed
 │   ├── run.py               entrypoint
@@ -20,18 +21,25 @@ correct.
 │   ├── events.py            error/warning recorder
 │   ├── translations/en.yaml option names + descriptions for the config screen
 │   ├── README.md            shown on the install page
-│   └── DOCS.md              shown in the Documentation tab (identical to README)
+│   └── DOCS.md              symlink → README.md; shown in the Documentation tab
 ├── tests/                   conftest.py + test_logic.py, test_events.py, test_radar.py
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
 
+Distributed as a Home Assistant **Add-on Store repository** (Settings → Add-ons
+→ Add-on Store → ⋮ → Repositories → paste the repo URL), not through HACS —
+HACS covers integrations/frontend, not Supervisor add-ons. The Supervisor scans
+the repo's **top level** for folders containing `config.yaml`; `tests/`,
+`tools/`, and `HANDOFF.md` have none, so they're ignored automatically and stay
+out of the built Docker image (each add-on folder is its own build context).
+A second add-on, if one is ever added, would be a new sibling top-level folder.
+
 **The add-on directory name is load-bearing: it must equal the `slug` in
 `config.yaml` (`swiss_meteo_shade`, underscores).** If they diverge the add-on
 still installs and runs, but the Supervisor silently fails to load
-`translations/en.yaml` and the config screen shows raw option keys. Nesting the
-add-on in its own directory makes this structural rather than something to
-remember.
+`translations/en.yaml` and the config screen shows raw option keys. Don't rename
+the `swiss_meteo_shade/` folder without also updating `config.yaml`'s `slug`.
 
 Tests and tools import app modules (`logic`, `events`, `radar`), so the add-on
 directory is put on `sys.path` two ways: `tests/conftest.py` covers pytest, and
@@ -48,7 +56,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.0.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.0.1. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -188,8 +196,8 @@ the problem and 0.1 is correct.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
 - Tests: 25 logic + 5 events + 5 radar, all passing, no external deps beyond
   numpy for the radar ones.
-- `README.md` and `DOCS.md` are intentionally byte-identical (install page and
-  Documentation tab).
+- `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
+  content, kept identical structurally rather than by manual duplication).
 
 ## Hard-won operational lessons
 

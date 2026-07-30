@@ -132,68 +132,25 @@ alert on it if you want to know when you are running on the unofficial feed.
 > No MQTT username or password is needed. The app gets credentials from the
 > Supervisor at startup.
 
-## Step 2 — Get access to the `/addons` folder
+## Step 2 — Add this repository and install the add-on
 
-Install either the **Samba share** app (`\\homeassistant\addons` from Windows,
-`smb://homeassistant/addons` from macOS) or the **Advanced SSH & Web Terminal**
-app. The folder is still called `addons` despite the Apps rename.
-
-## Step 3 — Copy the add-on folder
-
-Copy the whole `swiss_meteo_shade/` folder into `/addons` on your Home Assistant
-machine, so you end up with `/addons/swiss_meteo_shade/`.
-
-The folder name must match the `slug` in `config.yaml` character for character —
-**underscores, not hyphens**. A mismatch (e.g. a folder called
-`swiss-meteo-shade`) still installs and runs fine, but the Supervisor then can't
-load `translations/en.yaml`, so the Configuration screen silently shows raw
-option keys instead of the friendly names. If you see that, check the folder
-name first.
-
-```
-swiss_meteo_shade/            → copy this whole folder to /addons/
-├── config.yaml
-├── Dockerfile
-├── run.py
-├── shade.py          orchestrator
-├── forecast.py       gust + sunshine, official/app/Open-Meteo
-├── logic.py          the awning/blind decision
-├── radar.py          rain from the radar composite
-├── events.py         records the latest error/warning for the two event sensors
-├── translations/
-│   └── en.yaml       friendly names + descriptions for the Configuration screen
-├── README.md         shown on the app's page during install
-└── DOCS.md           shown in the app's Documentation tab afterwards
-```
-
-The `translations/` subfolder is what makes the **Configuration** tab show a
-readable name and description for each option instead of the raw keys — make
-sure it comes along. Without it the add-on still works, but the options screen
-is bare.
-
-Nothing else from the repository belongs in `/addons`. The `tests/` and `tools/`
-folders sit beside the add-on precisely so that copying the add-on folder can't
-accidentally ship them.
-
-## Step 4 — Make the app appear
-
-1. Settings → **Apps** → **⋮** (top right) → **Check for updates**. This makes
-   the Supervisor notice the new folder.
-2. Immediately click **Install app** (bottom right) to open the store.
-
-"Swiss Meteo Shade" appears under **Local apps**. It is only visible *inside the
-store view*, not in the Apps list, until it has been installed.
+1. Settings → **Apps** (Add-on Store on older Home Assistant) → **⋮** (top
+   right) → **Repositories** → paste
+   `https://github.com/CHfish-ch/ha-addons` → **Add** → **Close**.
+2. The Supervisor rescans automatically; if "Swiss Meteo Shade" doesn't appear
+   within a few seconds, **⋮** → **Check for updates** and reopen the store.
+3. **Swiss Meteo Shade** now appears in the store. Click it → **Install**. The
+   Supervisor builds a container on your device (downloads numpy/h5py; a few
+   minutes). The **Log** tab shows progress.
 
 > Not showing? Enable **Advanced Mode** in your user profile (bottom left) and
-> repeat both steps.
+> repeat step 2.
 
-## Step 5 — Install it
+*(Don't want to add a repository? See [Alternative: manual
+install](#alternative-manual-install-without-adding-the-repository) near the
+end of this page.)*
 
-Click **Swiss Meteo Shade** → **Install**. The Supervisor builds a container on
-your device (downloads numpy/h5py; a few minutes). The **Log** tab shows
-progress.
-
-## Step 6 — Find your coordinates
+## Step 3 — Find your coordinates
 
 Open **https://map.geo.admin.ch/**, right-click your building, and read the
 **CH1903+ / LV95** line — two numbers, e.g. `2 665 512, 1 211 882`. First is
@@ -201,14 +158,14 @@ easting, second northing. LV95 is used because the radar grid is native to it.
 
 Also note your **postcode** for the `plz` option (used by the app fallback).
 
-## Step 7 — Configure
+## Step 4 — Configure
 
 Open the app's **Configuration** tab:
 
 | Option | Meaning | Default |
 | --- | --- | --- |
-| `easting` | LV95 easting (step 6) | *Lucerne placeholder — replace* |
-| `northing` | LV95 northing (step 6) | *Lucerne placeholder — replace* |
+| `easting` | LV95 easting (step 3) | *Lucerne placeholder — replace* |
+| `northing` | LV95 northing (step 3) | *Lucerne placeholder — replace* |
 | `plz` | your postcode, for the app fallback | `"6006"` |
 | `gust_limit_kmh` | retract the awning at/above this gust | `40` |
 | `gust_release_kmh` | re-extend below this (hysteresis); `0` = off | `0` |
@@ -228,11 +185,11 @@ Open the app's **Configuration** tab:
 Replace the coordinate defaults. `gust_limit_kmh` is the number you will most
 likely tune — see *Tuning* below.
 
-## Step 8 — Start it
+## Step 5 — Start it
 
 **Info** tab → turn on **Start on boot** and **Watchdog**, then **Start**.
 
-## Step 9 — Check it worked
+## Step 6 — Check it worked
 
 The **Log** tab prints one timestamped line per cycle (each line begins with a
 UTC ISO timestamp). If you prefer local-time stamps in the viewer, Home
@@ -324,7 +281,7 @@ maximum across them — the value the decision actually uses.
 
 ---
 
-## Step 10 — Automations
+## Step 7 — Automations
 
 Extend the awning when safe, retract on the override:
 
@@ -576,6 +533,61 @@ upstream.
 `rain_forensics.py` is the one you're most likely to want: if the awning ever
 moves and you can't see why, it reconstructs that exact cycle from the public
 archive.
+
+---
+
+## Alternative: manual install without adding the repository
+
+If you'd rather not add a repository to your Add-on Store — or you're testing
+a local change before pushing it — you can copy the add-on folder onto the box
+directly instead of doing [Step 2](#step-2--add-this-repository-and-install-the-add-on):
+
+1. Install either the **Samba share** app (`\\homeassistant\addons` from
+   Windows, `smb://homeassistant/addons` from macOS) or the **Advanced SSH &
+   Web Terminal** app. The folder is still called `addons` despite the Apps
+   rename.
+2. Copy the whole `swiss_meteo_shade/` folder from this repository into
+   `/addons` on your Home Assistant machine, so you end up with
+   `/addons/swiss_meteo_shade/`.
+
+   The folder name must match the `slug` in `config.yaml` character for
+   character — **underscores, not hyphens**. A mismatch still installs and
+   runs fine, but the Supervisor then can't load `translations/en.yaml`, so the
+   Configuration screen silently shows raw option keys instead of the friendly
+   names. If you see that, check the folder name first.
+
+   ```
+   swiss_meteo_shade/            → copy this whole folder to /addons/
+   ├── config.yaml
+   ├── Dockerfile
+   ├── run.py
+   ├── shade.py          orchestrator
+   ├── forecast.py       gust + sunshine, official/app/Open-Meteo
+   ├── logic.py          the awning/blind decision
+   ├── radar.py          rain from the radar composite
+   ├── events.py         records the latest error/warning for the two event sensors
+   ├── translations/
+   │   └── en.yaml       friendly names + descriptions for the Configuration screen
+   ├── README.md         shown on the app's page during install
+   └── DOCS.md           shown in the app's Documentation tab afterwards
+   ```
+
+   The `translations/` subfolder is what makes the **Configuration** tab show a
+   readable name and description for each option instead of the raw keys —
+   make sure it comes along. Without it the add-on still works, but the
+   options screen is bare.
+
+   Nothing else from the repository belongs in `/addons`. The `tests/` and
+   `tools/` folders sit beside the add-on precisely so that copying just the
+   add-on folder can't accidentally ship them.
+3. Settings → **Apps** → **⋮** (top right) → **Check for updates**, then
+   immediately click **Install app** (bottom right) to open the store.
+   "Swiss Meteo Shade" appears under **Local apps** — but only *inside the
+   store view*, not in the Apps list, until it has been installed.
+4. Click **Swiss Meteo Shade** → **Install**.
+
+This copy will not auto-update — pull new changes and re-copy the folder
+yourself when you want to update.
 
 ---
 
