@@ -1,0 +1,48 @@
+name: Swiss Meteo Shade
+version: "1.0.0"
+slug: swiss_meteo_shade
+description: Weather-driven awning & blind automation from MeteoSwiss open data (Switzerland only)
+arch:
+  - aarch64
+  - amd64
+init: false
+startup: services
+boot: auto
+services:
+  - mqtt:need
+options:
+  easting: 2665512.66
+  northing: 1211882.47
+  plz: "6006"
+  gust_limit_kmh: 40
+  gust_release_kmh: 0
+  min_temp_c: ""
+  use_openmeteo: true
+  prefer_app_forecast: false
+  lookahead_hours: 2
+  sun_min_awning: 20
+  sun_min_backup: 20
+  sun_min_independent: 20
+  radar_threshold_mmh: 0.1
+  radar_tolerance_km: 1
+  radar_fail_safe: false
+  interval_seconds: 300
+  forecast_max_cache_minutes: 60
+schema:
+  easting: float
+  northing: float
+  plz: str
+  gust_limit_kmh: float
+  gust_release_kmh: float
+  min_temp_c: str?
+  use_openmeteo: bool
+  prefer_app_forecast: bool
+  lookahead_hours: int(1,6)
+  sun_min_awning: int(0,60)
+  sun_min_backup: int(0,60)
+  sun_min_independent: int(0,60)
+  radar_threshold_mmh: float
+  radar_tolerance_km: int(0,5)
+  radar_fail_safe: bool
+  interval_seconds: int(60,3600)
+  forecast_max_cache_minutes: int(0,720)

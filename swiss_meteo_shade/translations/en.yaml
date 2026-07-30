@@ -1,0 +1,52 @@
+configuration:
+  easting:
+    name: Easting (LV95)
+    description: "Your location's east coordinate in the Swiss LV95 system. Read it off map.geo.admin.ch by right-clicking your building (the CH1903+/LV95 line, first number). Example 2665512."
+  northing:
+    name: Northing (LV95)
+    description: "Your location's north coordinate in LV95 (second number from map.geo.admin.ch). Example 1211882."
+  plz:
+    name: Postcode
+    description: "Your Swiss postcode, used by the app forecast fallback. Example 6006."
+  gust_limit_kmh:
+    name: Gust limit (km/h)
+    description: "Retract the awning when the forecast gust reaches or exceeds this speed. 40 is a cautious default; raise it if the awning tolerates more wind."
+  gust_release_kmh:
+    name: Gust release (km/h) - hysteresis
+    description: "Once retracted for wind, stay retracted until the gust drops below this value, then re-extend. Prevents flapping near the limit. Set 0 to disable hysteresis (re-extends as soon as gust falls below the gust limit). Must be at or below the gust limit."
+  min_temp_c:
+    name: Minimum temperature (deg C)
+    description: "Do not deploy any shade when the forecast temperature is below this value. Enter 0 to block below exactly 0 C; a negative value is allowed. Leave EMPTY to disable the temperature gate entirely (empty means off, not 0)."
+  use_openmeteo:
+    name: Use Open-Meteo ICON gust
+    description: "Add Open-Meteo's ICON-CH1 model (1-2 km grid) as a second gust source. It only ever raises caution: the gust used is the maximum across sources."
+  prefer_app_forecast:
+    name: Prefer app forecast
+    description: "Try the MeteoSwiss app's (unofficial, fresher) forecast before the official open-data source. Off by default for durability."
+  lookahead_hours:
+    name: Look-ahead window (hours)
+    description: "How many hours ahead the gust and sunshine outlook considers. 2 suits 'should the awning be out now'; increase for earlier, more cautious action."
+  sun_min_awning:
+    name: Awning sunshine threshold (min/hour)
+    description: "Minutes of sun per hour (peak in the look-ahead window) required before the awning extends. 20 = a mostly-sunny hour. Raise for stronger sun only, lower to extend on hazier spells. Drives the Awning extend and Sun expected sensors."
+  sun_min_backup:
+    name: Backup-blind sunshine threshold (min/hour)
+    description: "Sunshine threshold for closing the backup blind (the awning's substitute when it is too windy or wet). Independent of the awning threshold. 20 default."
+  sun_min_independent:
+    name: Independent-blind sunshine threshold (min/hour)
+    description: "Sunshine threshold for the independent blinds, which have no wind or rain vulnerability. Often set lower than the awning (e.g. 5-10) so interior glare/heat blinds come down even in weaker sun. 20 default."
+  radar_threshold_mmh:
+    name: Rain threshold (mm/h)
+    description: "Rain rate at or above which the radar counts a cell as rain. 0.1 catches light drizzle; raise it to ignore very light precipitation."
+  radar_tolerance_km:
+    name: Radar tolerance (km)
+    description: "How far around your exact cell the radar looks when projecting rain forward. 1 km is a sensible default."
+  radar_fail_safe:
+    name: Radar fail-safe
+    description: "If the radar service is unreachable, treat it as rain and retract, rather than assuming dry. Turn on in high-exposure spots where a missed shower is costly."
+  interval_seconds:
+    name: Update interval (seconds)
+    description: "How often to fetch data and republish. 300 (5 min) matches the radar cadence. Raise it on a metered connection."
+  forecast_max_cache_minutes:
+    name: Forecast cache ceiling (minutes)
+    description: "Force a full forecast re-download after this long even if the server reports it unchanged - an independent freshness net on top of the per-cycle conditional request. 60 is fine. Set 0 to never force (rely on the conditional request alone)."
