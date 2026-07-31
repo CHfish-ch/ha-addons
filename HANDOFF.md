@@ -304,6 +304,21 @@ config changes came out of the investigation:
 - Heredoc `str.replace` edits have silently failed more than once — reporting
   success while the file was unchanged. **Always re-verify with a behavioural
   test, not just a success message.**
+- **The Add-on Store does not see a new version immediately, and the way it
+  fails looks like a bug.** The Supervisor refreshes add-on repositories on its
+  own timer, not on push. Meanwhile the **Changelog tab reads the file live**
+  while **"Latest version" comes from the Supervisor's cached parse of
+  `config.yaml`** — so the dialog shows the new release's changelog next to
+  "Installed 1.1.0 / Latest 1.1.0". Verified 2026-08-01: 1.1.1 was pushed at
+  01:45 and the store showed exactly that contradiction for hours, then began
+  offering the update on its own with **no repo change and no `ha store
+  reload`** (`git diff 0bd58cf..HEAD -- config.yaml Dockerfile version.py` is
+  empty across that window).
+  **Do not "fix" this by bumping the version again** — that publishes a release
+  nobody needed and does not make the store refresh any sooner. Either wait, or
+  force it with `ha store reload` from the SSH add-on. Only start suspecting the
+  manifest if it never refreshes: `tests/test_imports.py` covers the config
+  faults that genuinely make the Supervisor keep a cached copy.
 - **Renaming an option needs a migration, not just a schema edit.** Options
   arrive from a file written by an *earlier* version, so a rename that looks
   clean on a fresh install can invert a returning user's setting —
