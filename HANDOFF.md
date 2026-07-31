@@ -23,7 +23,7 @@ correct.
 │   ├── translations/en.yaml option names + descriptions for the config screen
 │   ├── README.md            shown on the install page
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
-├── tests/                   conftest.py + test_logic, test_events, test_radar, test_imports
+├── tests/                   conftest.py + test_logic, test_events, test_radar, test_imports, test_options
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -272,7 +272,7 @@ config changes came out of the investigation:
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 5 radar + 4 imports/manifest, all passing; no external deps beyond
+- Tests: 25 logic + 5 events + 5 radar + 4 imports/manifest + 7 options, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
@@ -304,6 +304,14 @@ config changes came out of the investigation:
 - Heredoc `str.replace` edits have silently failed more than once — reporting
   success while the file was unchanged. **Always re-verify with a behavioural
   test, not just a success message.**
+- **Renaming an option needs a migration, not just a schema edit.** Options
+  arrive from a file written by an *earlier* version, so a rename that looks
+  clean on a fresh install can invert a returning user's setting —
+  `use_openmeteo: false` became `openmeteo_mode: always`, the exact opposite.
+  `run.apply_options` now carries the old key over; `tests/test_options.py`
+  locks every upgrade path. Do the same for any future rename, and don't add
+  the legacy key back to `config.yaml`'s schema (it would reappear in the
+  Configuration UI).
 - **`py_compile` is not a verification.** 1.1.0 shipped `run.py` referencing
   `USER_AGENT` without importing it: a missing import is a runtime NameError,
   not a syntax error, so compiling passed and every unit test passed (none

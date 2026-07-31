@@ -10,6 +10,10 @@
   the globals it references actually resolve. It reproduces the 1.1.0 failure
   and would have caught it. It also pins the Dockerfile `COPY` list to the
   modules on disk, and the three hand-maintained version strings to each other.
+- Upgrade fix: a config saved before 1.1.0 still carries the old
+  `use_openmeteo` bool. It is now carried over (`false` → `never`,
+  `true` → `always`) with a warning. Previously a deliberate
+  `use_openmeteo: false` silently became fully on.
 
 ## 1.1.0 - 2026-07-30
 
