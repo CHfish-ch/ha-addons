@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.1 - 2026-08-01
+
+- **Fixes a crash on startup in 1.1.0.** `run.py` used the User-Agent constant
+  without importing it, so the container died immediately with
+  `NameError: name 'USER_AGENT' is not defined`. 1.1.0 could not start at all;
+  update straight to 1.1.1.
+- Added `tests/test_imports.py`, which disassembles every function and checks
+  the globals it references actually resolve. It reproduces the 1.1.0 failure
+  and would have caught it. It also pins the Dockerfile `COPY` list to the
+  modules on disk, and the three hand-maintained version strings to each other.
+
 ## 1.1.0 - 2026-07-30
 
 - Replaced `use_openmeteo` (bool) with `openmeteo_mode`: `always` (default,

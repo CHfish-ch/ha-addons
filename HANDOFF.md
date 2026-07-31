@@ -23,7 +23,7 @@ correct.
 │   ├── translations/en.yaml option names + descriptions for the config screen
 │   ├── README.md            shown on the install page
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
-├── tests/                   conftest.py + test_logic.py, test_events.py, test_radar.py
+├── tests/                   conftest.py + test_logic, test_events, test_radar, test_imports
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -57,7 +57,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.1.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.1.1. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -272,7 +272,7 @@ config changes came out of the investigation:
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 5 radar, all passing, no external deps beyond
+- Tests: 25 logic + 5 events + 5 radar + 4 imports/manifest, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
@@ -304,6 +304,14 @@ config changes came out of the investigation:
 - Heredoc `str.replace` edits have silently failed more than once — reporting
   success while the file was unchanged. **Always re-verify with a behavioural
   test, not just a success message.**
+- **`py_compile` is not a verification.** 1.1.0 shipped `run.py` referencing
+  `USER_AGENT` without importing it: a missing import is a runtime NameError,
+  not a syntax error, so compiling passed and every unit test passed (none
+  exercise `run.py:main`). It crashed on the first real container start.
+  `tests/test_imports.py` now disassembles every function and checks its
+  global lookups resolve — run it after any import or refactor change. When
+  you edit several files by `sed`/bulk replace, assume one was missed until a
+  test proves otherwise.
 - Several review rounds flagged bugs that didn't exist, because the reviewer
   worked from a stale snapshot. Verify against the current file before fixing.
 

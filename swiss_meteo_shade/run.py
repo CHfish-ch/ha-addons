@@ -31,6 +31,7 @@ sys.path.insert(0, "/app")
 import events     # noqa: E402
 import forecast   # noqa: E402
 import shade      # noqa: E402
+from version import USER_AGENT   # noqa: E402
 
 _WIND_STATE_FILE = "/data/wind_high.json"
 
