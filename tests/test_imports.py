@@ -108,6 +108,72 @@ def test_version_is_consistent_across_manifests():
         f"config.yaml={cfg}, Dockerfile={lbl}")
 
 
+def _section_keys(path, section):
+    """Top-level keys of a mapping section, without needing PyYAML."""
+    import re
+    keys, inside, indent = [], False, None
+    with open(path, encoding="utf-8") as fh:
+        for line in fh:
+            if re.match(rf"^{section}:\s*$", line):
+                inside = True
+                continue
+            if not inside or not line.strip():
+                continue
+            if not re.match(r"^\s", line):          # dedent ends the section
+                inside = False
+                continue
+            m = re.match(r"^(\s+)([A-Za-z0-9_]+):", line)
+            if m:
+                if indent is None:
+                    indent = len(m.group(1))
+                if len(m.group(1)) == indent:
+                    keys.append(m.group(2))
+    return keys
+
+
+def _addon_dir():
+    return os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "swiss_meteo_shade"))
+
+
+def test_options_schema_and_translations_agree():
+    """A key present in one file but not the others makes the Supervisor
+    reject config.yaml -- which shows up as an add-on that silently refuses
+    to update, not as an obvious error."""
+    root = _addon_dir()
+    opts = set(_section_keys(os.path.join(root, "config.yaml"), "options"))
+    schema = set(_section_keys(os.path.join(root, "config.yaml"), "schema"))
+    trans = set(_section_keys(os.path.join(root, "translations", "en.yaml"),
+                              "configuration"))
+    assert opts == schema, (
+        f"options vs schema: only in options={sorted(opts - schema)}, "
+        f"only in schema={sorted(schema - opts)}")
+    assert schema == trans, (
+        f"schema vs translations: only in schema={sorted(schema - trans)}, "
+        f"only in translations={sorted(trans - schema)}")
+
+
+def test_schema_types_are_valid():
+    """Only the types the Supervisor documents; an unknown one is rejected."""
+    import re
+    valid = ("str", "bool", "int", "float", "email", "url", "password",
+             "port", "match(", "list(", "device")
+    bad = []
+    with open(os.path.join(_addon_dir(), "config.yaml"), encoding="utf-8") as fh:
+        in_schema = False
+        for line in fh:
+            if re.match(r"^schema:\s*$", line):
+                in_schema = True
+                continue
+            if in_schema and line.strip() and not re.match(r"^\s", line):
+                break
+            m = re.match(r"^\s+([A-Za-z0-9_]+):\s*(.+?)\s*$", line) \
+                if in_schema else None
+            if m and not m.group(2).strip('"\'').rstrip("?").startswith(valid):
+                bad.append(f"{m.group(1)}={m.group(2)}")
+    assert not bad, f"invalid schema types: {bad}"
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0
