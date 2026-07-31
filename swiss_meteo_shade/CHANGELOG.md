@@ -1,5 +1,29 @@
 # Changelog
 
+## 1.1.0 - 2026-07-30
+
+- Replaced `use_openmeteo` (bool) with `openmeteo_mode`: `always` (default,
+  unchanged behaviour), `fallback_only` (only used when the MeteoSwiss gust is
+  unavailable, so it can no longer override a valid MeteoSwiss reading), or
+  `never`. If you had `use_openmeteo: false`, set `openmeteo_mode: never` to
+  keep that behaviour -- the old option is no longer read.
+- `lookahead_hours` default changed from `2` to `1`, so the awning/blinds
+  react closer to the affected hour instead of up to 2 hours ahead of it.
+- The configured postcode is now checked once at startup: a few Swiss
+  postcodes carry no app data at all, which silently disabled the forecast
+  fallback. You now get a warning in the log and on the `Last warning` sensor
+  instead of only finding out during an outage.
+- App forecast failures now distinguish "unreachable" from "this postcode has
+  no data" in the log, rather than both reading as a transient blip.
+- Fixed the version shown in Home Assistant's device info, which was stuck at
+  1.0.0. The version and the User-Agent sent to MeteoSwiss/Open-Meteo now
+  derive from one constant instead of being hardcoded in five places.
+- Documentation: the example automation now also triggers on `Rain within
+  10 min` and `Wind high` turning on. Without them, rain arriving while
+  already retracted for wind produces no change to `Shade recommendation`, so
+  an awning manually put back out by hand would stay out through the rain.
+  **Worth applying to your own automation** -- no add-on change is involved.
+
 ## 1.0.1 - 2026-07-30
 
 - Lead with Add-on Store installation; manual `/addons` copy moved to an

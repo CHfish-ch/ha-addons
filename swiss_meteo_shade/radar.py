@@ -26,6 +26,8 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+from version import USER_AGENT
+
 # numpy and h5py are only needed to read radar files. Keeping them optional
 # means `--probe` works anywhere with just `pip install requests`.
 try:
@@ -462,7 +464,7 @@ def evaluate(session=None):
     own = session is None
     if own:
         session = requests.Session()
-        session.headers["User-Agent"] = "swiss-meteo-shade/1.0"
+        session.headers["User-Agent"] = USER_AGENT
 
     assets = latest_rzc_assets(3, session)
     frames, buffers = [], []

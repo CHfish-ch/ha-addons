@@ -1,5 +1,5 @@
 name: Swiss Meteo Shade
-version: "1.0.1"
+version: "1.1.0"
 slug: swiss_meteo_shade
 description: Weather-driven awning & blind automation from MeteoSwiss open data (Switzerland only)
 arch:
@@ -17,9 +17,9 @@ options:
   gust_limit_kmh: 40
   gust_release_kmh: 0
   min_temp_c: ""
-  use_openmeteo: true
+  openmeteo_mode: always
   prefer_app_forecast: false
-  lookahead_hours: 2
+  lookahead_hours: 1
   sun_min_awning: 20
   sun_min_backup: 20
   sun_min_independent: 20
@@ -35,7 +35,7 @@ schema:
   gust_limit_kmh: float
   gust_release_kmh: float
   min_temp_c: str?
-  use_openmeteo: bool
+  openmeteo_mode: list(always|fallback_only|never)
   prefer_app_forecast: bool
   lookahead_hours: int(1,6)
   sun_min_awning: int(0,60)

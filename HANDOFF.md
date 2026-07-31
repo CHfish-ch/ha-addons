@@ -19,6 +19,7 @@ correct.
 │   ├── logic.py             pure decision function
 │   ├── radar.py             RZC composite → rain nowcast
 │   ├── events.py            error/warning recorder
+│   ├── version.py           VERSION + USER_AGENT; dependency-free on purpose
 │   ├── translations/en.yaml option names + descriptions for the config screen
 │   ├── README.md            shown on the install page
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
@@ -56,7 +57,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.0.1. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.1.0. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -140,11 +141,24 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   hourly values.
 - Anchored to `graph['start']` (local midnight), **not** `startLowResolution`.
 - Missing-value sentinel is 32767.
+- **Some postcodes carry no data at all**: HTTP 200, but the `graph` object is
+  absent entirely (verified 2026-07-31 against 1195 Dully; 1946 and 6006 are
+  fine). `from_app` already degraded correctly, but silently — so
+  `validate_plz` now runs once at startup and warns, and `from_app`
+  distinguishes "unreachable" from "this postcode has no data" in the log.
+  Don't auto-substitute a neighbouring postcode: the replacement can be data-
+  less too, and it turns a clear config error into a silent wrong-location one.
+- Array **lengths vary between requests** (`precipitation10m` was 138/139 one
+  afternoon, 99 the next morning), so never assume a fixed length; always
+  index by time from `graph['start']`.
 
 **Open-Meteo**
 - Model `meteoswiss_icon_ch1`, field `wind_gusts_10m`, `forecast_days=2`,
-  timezone UTC. Gust only. Joined into the gust set via `max()` — it can only
-  raise caution, never lower it.
+  timezone UTC. Gust only.
+- `openmeteo_mode` (`always` / `fallback_only` / `never`) controls when it's
+  fetched at all. Under `always` and `fallback_only` (when it does fetch), it
+  joins the gust set via `max()` — it can only raise caution, never lower it.
+  See the 2026-07-30 incident below for why `fallback_only` exists.
 
 ## Decisions worth not re-litigating
 
@@ -155,7 +169,26 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   one of the two per-source gust sensors always reads Unknown.
 - **Fail-safe on gust:** retract if *every* gust source fails. A present-but-low
   gust is trusted.
+- `lookahead_hours`' window is always "now − 1h" to "now + lookahead_hours" —
+  it **always** includes the current hour no matter how small the setting is.
+  Shrinking it doesn't filter a bad *current*-hour forecast; it only reduces
+  how many hours *before* a forecast hour the system starts reacting to it.
 - **Fail-open on radar by default** (`radar_fail_safe: false`), configurable.
+- **No app-forecast fallback for the radar.** Investigated 2026-07-30/31 and
+  rejected against live data; `tools/precip_probe.py` re-runs the test. The
+  app does expose `precipitation10m` / `precipitation1h`, anchored to
+  `graph['start']` like the other arrays, in **mm accumulated per bucket**
+  (x6 for a 10-min bucket to compare with the radar's mm/h -- calibration was
+  good: app 0.7 mm/10min vs radar 3.61 mm/h). But it is not trustworthy as a
+  safety input: at Wolfenschiessen `precipitation10m` read **0.0 while the
+  radar saw 9.35 mm/h** (a fast convective cell, 9.35 -> 0.11 mm/h in one
+  frame -- exactly the case the awning cares about), and the next morning
+  `precipitation10m` tracked widespread rain correctly while
+  `precipitation1h` read 0.0 for that same hour. Each series missed a
+  radar-confirmed event in one of two tests, so there is no single series to
+  code against. Postcode resolution is also structurally wrong for convective
+  showers. `radar_fail_safe` stays the answer: it is honest about not knowing,
+  where this would have been confidently wrong.
 - Missing sunshine → `None` (unknown), never silently "not sunny".
 - Hysteresis is keyed on `prev_wind_high`, **not** `prev_retract` — otherwise a
   rain cycle shifts the wind threshold. Persisted across restarts.
@@ -168,6 +201,20 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   appeared; repeats don't update it. Attributes come from a dedicated small
   topic. Both exist so a persistent condition notifies once, not every cycle.
 - Motion estimation is **gated on real echo** — see below.
+- **`recommendation` deliberately collapses wind and rain into one `backup`
+  value**, so it does NOT change when rain is added to an existing wind
+  retract. That is not an oversight: splitting it (e.g. `backup_wind` vs
+  `backup_rain`) would break every existing automation's `to:` list for no
+  gain. The consequence — an awning manually re-extended against a `backup`
+  recommendation would sit through arriving rain, because no state transition
+  re-fires the automation — is handled in the **automation**, by also
+  triggering on `Rain within 10 min` / `Wind high` turning on. Documented under
+  "Manual overrides" in README. A `retract_reasons` sensor was considered as
+  the alternative and deferred: it adds a 21st entity to save two trigger
+  lines, and entities are far easier to add than to remove (see below).
+- The add-on **never knows the actual cover position** and never commands the
+  covers. Any "did the user override us?" logic would be guesswork; keep the
+  decision one-way (publish a recommendation) and let the automation own it.
 
 ## The 2026-07-28 incident (most instructive bug)
 
@@ -188,6 +235,37 @@ nearby means nothing can arrive within the lead time. Locked by `test_radar.py`.
 **Do not "fix" this by raising `radar_threshold_mmh`.** The threshold was never
 the problem and 0.1 is correct.
 
+## The 2026-07-30 incident (Open-Meteo gust spike)
+
+User reported `Gust (Open-Meteo ICON)` reading 72.7 km/h, stuck for 80 minutes,
+while `Gust (MeteoSwiss official)` read 37.1 km/h and trees were visibly calm.
+
+Live query of the Open-Meteo API for the user's exact coordinates confirmed the
+app reported the number faithfully — no unit or coordinate-conversion bug
+(both were re-verified against this incident: `_lv95_to_wgs84` in `shade.py`
+and `wind_speed_unit=kmh` in `forecast.py` are correct). The raw hourly series
+showed an isolated single-hour spike sandwiched between ~12-15 km/h neighbors,
+and the same afternoon slot the following day spiked even harder (52 → 77 →
+131 km/h) — both patterns consistent with ICON-CH1's convective/thunderstorm
+gust diagnostic firing at this grid cell rather than a real, verifying wind
+event. MeteoSwiss's more calibrated official forecast didn't show it.
+
+This is not a bug to "fix" in the sense of the 07-28 incident — the model
+output itself is (apparently) noisy at this grid cell, not the code. Two
+config changes came out of the investigation:
+
+- `use_openmeteo` (bool) → **`openmeteo_mode`** (`always` / `fallback_only` /
+  `never`). `fallback_only` means Open-Meteo only fills in when the
+  MeteoSwiss official/app gust is unavailable that cycle, so it can no longer
+  override a valid MeteoSwiss reading with a single-source spike — at the
+  cost of losing the "catches a local gust MeteoSwiss smooths away" benefit
+  that was the reason Open-Meteo was added in the first place. `always`
+  (unchanged default) keeps the original max-across-sources behaviour.
+- `lookahead_hours` default **2 → 1**. This does *not* address the reading
+  itself (the spike was for the current hour, always in-window regardless of
+  setting) — it addresses how early the blinds started reacting to that hour
+  *before* it arrived. See the "Decisions worth not re-litigating" note above.
+
 ## Current state
 
 - 20 MQTT entities. Operational: recommendation, the three shade decisions, and
@@ -198,10 +276,19 @@ the problem and 0.1 is correct.
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
-- `CHANGELOG.md` exists and is shown in the Supervisor's Changelog tab. Bump
-  `version` (in `config.yaml` and the Dockerfile `LABEL`) and add an entry here
-  together, in the same commit, every time — see "Version currently lives in
-  three places" below.
+- `CHANGELOG.md` exists and is shown in the Supervisor's Changelog tab. Add an
+  entry in the same commit as every version bump.
+- **Bumping the version touches exactly three files**: `version.py` `VERSION`
+  (the single source for all Python — the MQTT `sw_version` in HA's device
+  info and the outbound `USER_AGENT` both derive from it), `config.yaml`
+  `version:`, and the Dockerfile `LABEL io.hass.version`. The latter two are
+  build manifests the Supervisor reads before Python runs, so they can't
+  import `version.py`. This drifted twice before `version.py` existed (1.0.1
+  shipped a 1.0.0 `sw_version`; 1.1.0 was caught pre-commit with a stale
+  Dockerfile label) — grep for the old number after bumping.
+- `version.py` is **dependency-free on purpose** so every module can import it
+  without a circular import. It must stay in the Dockerfile `COPY` line;
+  leaving it out breaks the container at import time, not at build time.
 
 ## Hard-won operational lessons
 
@@ -248,10 +335,7 @@ external dependencies.
 - Radar re-downloads two already-seen frames each cycle (a 3-entry cache would
   cut radar traffic by two-thirds).
 - Packaging: `build.yaml` with `ARG BUILD_FROM` and CI running the test suites
-  are still open. `repository.yaml` and `CHANGELOG.md` are done. Version still
-  lives in three places (`config.yaml`, the Dockerfile `LABEL`, and the "What
-  it is" section above) with nothing automated keeping them in sync — bump all
-  three by hand together.
+  are still open. `repository.yaml` and `CHANGELOG.md` are done.
 - HA polish: `device_class` on numeric sensors (`wind_speed`, `temperature`,
   `duration`), `enum` on the recommendation sensor, per-entity icons.
 - A `de.yaml` translation (Swiss German: `ss` not `ß`, dot as decimal separator).

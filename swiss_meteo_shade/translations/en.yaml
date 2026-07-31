@@ -7,7 +7,7 @@ configuration:
     description: "Your location's north coordinate in LV95 (second number from map.geo.admin.ch). Example 1211882."
   plz:
     name: Postcode
-    description: "Your Swiss postcode, used by the app forecast fallback. Example 6006."
+    description: "Your Swiss postcode, used by the app forecast fallback. Example 6006. A few postcodes carry no app data at all - the add-on checks yours at startup and logs a warning if so; pick a neighbouring postcode in that case."
   gust_limit_kmh:
     name: Gust limit (km/h)
     description: "Retract the awning when the forecast gust reaches or exceeds this speed. 40 is a cautious default; raise it if the awning tolerates more wind."
@@ -17,15 +17,15 @@ configuration:
   min_temp_c:
     name: Minimum temperature (deg C)
     description: "Do not deploy any shade when the forecast temperature is below this value. Enter 0 to block below exactly 0 C; a negative value is allowed. Leave EMPTY to disable the temperature gate entirely (empty means off, not 0)."
-  use_openmeteo:
-    name: Use Open-Meteo ICON gust
-    description: "Add Open-Meteo's ICON-CH1 model (1-2 km grid) as a second gust source. It only ever raises caution: the gust used is the maximum across sources."
+  openmeteo_mode:
+    name: Open-Meteo ICON gust mode
+    description: "When to add Open-Meteo's ICON-CH1 model (1-2 km grid) as a gust source, alongside MeteoSwiss. 'always': every cycle, and the gust used is the maximum of the two (can only raise caution, never lower it) -- the default. 'fallback_only': only when the MeteoSwiss official/app gust is unavailable that cycle. 'never': disable it entirely."
   prefer_app_forecast:
     name: Prefer app forecast
     description: "Try the MeteoSwiss app's (unofficial, fresher) forecast before the official open-data source. Off by default for durability."
   lookahead_hours:
     name: Look-ahead window (hours)
-    description: "How many hours ahead the gust and sunshine outlook considers. 2 suits 'should the awning be out now'; increase for earlier, more cautious action."
+    description: "How many hours ahead the gust and sunshine outlook considers. 1 reacts only to the current hour and the very next; increase for earlier warning of a forecast gust, at the cost of retracting further in advance of an hour that may turn out to be a forecast miss."
   sun_min_awning:
     name: Awning sunshine threshold (min/hour)
     description: "Minutes of sun per hour (peak in the look-ahead window) required before the awning extends. 20 = a mostly-sunny hour. Raise for stronger sun only, lower to extend on hazier spells. Drives the Awning extend and Sun expected sensors."

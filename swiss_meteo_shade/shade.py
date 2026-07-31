@@ -27,6 +27,7 @@ import events
 import radar
 import forecast
 import logic
+from version import VERSION, USER_AGENT
 
 # ---------------------------------------------------------------------------
 # CONFIG (standalone defaults; run.py overrides from options.json)
@@ -36,9 +37,9 @@ PLZ = "6006"
 GUST_LIMIT_KMH = 40.0
 GUST_RELEASE_KMH = None                # hysteresis re-extend threshold; None=off
 MIN_TEMP_C = None                      # don't deploy shade below this; None=off
-USE_OPENMETEO = True
+OPENMETEO_MODE = "always"              # always | fallback_only | never
 PREFER_APP = False                     # official primary; True = app first
-LOOKAHEAD_H = 2
+LOOKAHEAD_H = 1
 RADAR_THRESHOLD_MMH = 0.1
 RADAR_TOLERANCE_KM = 1
 RADAR_FAIL_SAFE = False               # radar outage -> treat as rain (retract)?
@@ -139,7 +140,7 @@ def evaluate(session=None, prev_wind_high=False):
         rain = bool(RADAR_FAIL_SAFE)      # A7: honour fail-safe on outage too
 
     # 2. forecast gust + sunshine + temp
-    fc = forecast.gather(PLZ, e, n, lat, lon, use_openmeteo=USE_OPENMETEO,
+    fc = forecast.gather(PLZ, e, n, lat, lon, openmeteo_mode=OPENMETEO_MODE,
                          prefer_app=PREFER_APP, lookahead_h=LOOKAHEAD_H,
                          session=session, need_temp=MIN_TEMP_C is not None)
 
@@ -241,8 +242,8 @@ SENSORS = [
     ("last_warning_time", "Last warning", "last_warning_time", None, "diagnostic"),
     # Only the ACTIVE primary source has a value: official and app are a
     # primary/fallback pair, never queried in parallel, so whichever is not in
-    # use reads Unknown. Open-Meteo is queried alongside, so it is normally
-    # populated whenever use_openmeteo is on.
+    # use reads Unknown. Open-Meteo is populated whenever openmeteo_mode is
+    # 'always', or under 'fallback_only' when the MeteoSwiss gust failed.
     ("gust_official", "Gust (MeteoSwiss official)", "gust_official", "km/h",
      "diagnostic"),
     ("gust_app", "Gust (MeteoSwiss app, fallback)", "gust_app", "km/h",
@@ -288,7 +289,7 @@ def announce_discovery(client):
         cfg["unique_id"] = f"sms_{slug}"
         cfg["device"] = DEVICE
         cfg.setdefault("origin", {"name": "Swiss Meteo Shade",
-                                  "sw_version": "1.0.0"})   # B7
+                                  "sw_version": VERSION})   # B7
         client.publish(f"homeassistant/{domain}/sms_{slug}/config",
                        json.dumps(cfg), retain=True, qos=1)
 
@@ -366,6 +367,6 @@ if __name__ == "__main__":
                          f"Switzerland (read them off https://map.geo.admin.ch/).")
 
     with requests.Session() as s:
-        s.headers["User-Agent"] = "swiss-meteo-shade/1.0"
+        s.headers["User-Agent"] = USER_AGENT
         st = evaluate(session=s)
     print(json.dumps(st, indent=2))

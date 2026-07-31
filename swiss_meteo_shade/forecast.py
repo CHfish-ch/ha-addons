@@ -29,18 +29,21 @@ from datetime import datetime, timezone, timedelta
 import requests
 
 import events
+from version import USER_AGENT
 
 APP = "https://app-prod-ws.meteoswiss-app.ch"
 STAC = ("https://data.geo.admin.ch/api/stac/v1/collections/"
         "ch.meteoschweiz.ogd-local-forecasting")
 OPEN_METEO = "https://api.open-meteo.com/v1/forecast"
 
-UA = "swiss-meteo-shade/1.0 (Home Assistant add-on)"
+UA = USER_AGENT
 MISSING_APP = 32767          # MaxInt16 sentinel used by the app endpoint
 
 # How many hours ahead the outlook looks. Gust: the worst in this window drives
 # the retract decision. Sunshine: any good hour in this window counts as sunny.
-LOOKAHEAD_H = 2
+LOOKAHEAD_H = 1
+
+OPENMETEO_MODES = ("always", "fallback_only", "never")
 
 
 def _session():
@@ -56,14 +59,48 @@ def _session():
 #    Undocumented app endpoint; used only when prefer_app=True, or when the
 #    official source below is unavailable.
 # ---------------------------------------------------------------------------
+def validate_plz(plz, session=None):
+    """Check that `plz` actually carries app forecast data.
+
+    Some Swiss postcodes answer HTTP 200 with no `graph` object at all
+    (verified 2026-07-31 against 1195 Dully), which silently disables the app
+    fallback -- you would otherwise only discover it during an outage of the
+    official source, months after configuring it. Called once at startup so it
+    surfaces at configuration time instead.
+
+        True  -- data present
+        False -- postcode has none; permanent, needs a different plz
+        None  -- inconclusive (network error); don't cry wolf
+    """
+    s = session or _session()
+    try:
+        r = s.get(f"{APP}/v1/plzDetail", params={"plz": f"{plz}00"}, timeout=15)
+        r.raise_for_status()
+        return bool(r.json().get("graph"))
+    except (requests.RequestException, ValueError):
+        return None
+
+
 def from_app(plz, session=None, lookahead_h=LOOKAHEAD_H):
-    """Return {'gust_kmh':float, 'sunshine':bool} from the app, or None."""
+    """Return {'gust_kmh':float, 'sunshine':bool} from the app, or None.
+
+    Two very different failures both return None, so they are logged apart: a
+    transient network/HTTP problem, versus a postcode the endpoint answers 200
+    for while carrying no data at all. The second is permanent and needs a
+    config change -- it must not read as a passing blip. See validate_plz.
+    """
     s = session or _session()
     try:
         r = s.get(f"{APP}/v1/plzDetail", params={"plz": f"{plz}00"}, timeout=25)
         r.raise_for_status()
         graph = r.json().get("graph", {})
-    except (requests.RequestException, ValueError):
+    except (requests.RequestException, ValueError) as exc:
+        events.warn(f"app forecast unreachable: {type(exc).__name__}: {exc}")
+        return None
+
+    if not graph:
+        events.warn(f"postcode {plz} carries no app forecast data -> app "
+                    f"fallback unavailable; check the plz option")
         return None
 
     # Bug 6 (verified 2026-07-26 via timing_probe): the 144-long HOURLY arrays
@@ -434,7 +471,7 @@ def from_openmeteo(lat, lon, session=None, lookahead_h=LOOKAHEAD_H):
 # ---------------------------------------------------------------------------
 # Orchestration: combine sources into the signals the awning logic needs
 # ---------------------------------------------------------------------------
-def gather(plz, lv95_e, lv95_n, lat, lon, use_openmeteo=True,
+def gather(plz, lv95_e, lv95_n, lat, lon, openmeteo_mode="always",
            prefer_app=False, lookahead_h=LOOKAHEAD_H, session=None,
            need_temp=None):
     """Return the merged forecast signals and provenance.
@@ -443,6 +480,10 @@ def gather(plz, lv95_e, lv95_n, lat, lon, use_openmeteo=True,
     direction for a safety decision. The sunshine/primary-gust source is the
     official OGD product by default (documented, licensed, stable); set
     prefer_app=True to try the app's fresher-but-unofficial feed first.
+
+    openmeteo_mode controls when the independent Open-Meteo ICON gust source
+    joins that max: 'always' (every cycle), 'fallback_only' (only when the
+    MeteoSwiss official/app gust is unavailable this cycle), or 'never'.
     """
     global NEED_TEMP
     if need_temp is not None:
@@ -486,7 +527,14 @@ def gather(plz, lv95_e, lv95_n, lat, lon, use_openmeteo=True,
             result["gust_sources"][result["forecast_source"]] = round(fc["gust_kmh"], 1)
 
     # independent Open-Meteo gust
-    if use_openmeteo:
+    meteoswiss_gust_ok = (fc is not None
+                          and result["gust_sources"].get(result["forecast_source"])
+                          is not None)
+    fetch_openmeteo = (
+        openmeteo_mode == "always"
+        or (openmeteo_mode == "fallback_only" and not meteoswiss_gust_ok)
+    )
+    if fetch_openmeteo:
         om = from_openmeteo(lat, lon, s, lookahead_h)
         result["openmeteo_ok"] = om is not None
         if om and om.get("gust_kmh") is not None:

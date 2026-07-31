@@ -100,11 +100,31 @@ the `Forecast source` entity (a string: `official` or `app`):
 - **Fallback: the MeteoSwiss app's `plzDetail` endpoint** — undocumented but
   updates more frequently. Used automatically if the official source fails, or
   made primary by setting `prefer_app_forecast: true`.
-- **Open-Meteo ICON** (`use_openmeteo`, on by default) — an independent gust
-  forecast on a 1–2 km grid, from the same ICON model family MeteoSwiss uses.
-  It only ever joins the gust decision on the cautious side: the gust used is
-  the **maximum** across every source that answered, so an extra source can make
-  the system more careful, never less.
+
+  A few Swiss postcodes carry **no app data at all** (the endpoint answers
+  normally but returns nothing). That would silently leave you without a
+  fallback, so the add-on checks your postcode once at startup and logs a
+  warning — visible in the **Log** tab and on the `Last warning` sensor — if
+  yours is one of them. Pick a neighbouring postcode if you see it. The
+  warning is about the *fallback* only; the official source is unaffected.
+- **Open-Meteo ICON** (`openmeteo_mode`) — an independent gust forecast on a
+  1–2 km grid, from the same ICON model family MeteoSwiss uses. Three modes:
+  - `always` (default) — fetched every cycle; the gust used is the
+    **maximum** across every source that answered, so it can only raise
+    caution, never lower it.
+  - `fallback_only` — only fetched when the MeteoSwiss official/app gust is
+    unavailable that cycle, so it never overrides a MeteoSwiss reading, only
+    stands in for a missing one.
+  - `never` — MeteoSwiss gust only.
+
+  `always` is the more cautious choice — a genuinely finer grid can catch a
+  local gust MeteoSwiss's postcode-level forecast misses. But ICON-CH1's raw
+  gust diagnostic can occasionally spike hard for a single hour at a specific
+  grid cell (a convective/thunderstorm signal that may not verify) while
+  MeteoSwiss's more calibrated forecast stays level for the same hour; under
+  `always` that spike wins the max and drives a retract. If that happens
+  often at your location, `fallback_only` trades away the extra-cautious
+  local-gust catch in exchange for not reacting to Open-Meteo's noise.
 
 If the primary forecast is unavailable, `Forecast source` reads `app` —
 alert on it if you want to know when you are running on the unofficial feed.
@@ -170,9 +190,9 @@ Open the app's **Configuration** tab:
 | `gust_limit_kmh` | retract the awning at/above this gust | `40` |
 | `gust_release_kmh` | re-extend below this (hysteresis); `0` = off | `0` |
 | `min_temp_c` | don't deploy shade below this °C; blank = off | *(blank)* |
-| `use_openmeteo` | include the Open-Meteo ICON gust source | `true` |
+| `openmeteo_mode` | when to use the Open-Meteo ICON gust source: `always` / `fallback_only` / `never` | `always` |
 | `prefer_app_forecast` | try the app feed before the official one | `false` |
-| `lookahead_hours` | how many hours ahead to look | `2` |
+| `lookahead_hours` | how many hours ahead to look | `1` |
 | `sun_min_awning` | minutes of sun per hour before the **awning** extends | `20` |
 | `sun_min_backup` | minutes of sun per hour before the **backup blind** closes | `20` |
 | `sun_min_independent` | minutes of sun per hour before the **independent blinds** close | `20` |
@@ -245,9 +265,10 @@ missing") precisely so they read correctly with those fixed words.
 only fetched when the official source fails, or when `prefer_app_forecast` is
 on. They are never queried in parallel, so whichever one isn't in use reads
 `Unknown`. That's normal: seeing `Gust (MeteoSwiss app, fallback)` as Unknown
-means the official source is working. `Gust (Open-Meteo ICON)` is fetched
-alongside the primary, so it's normally populated whenever `use_openmeteo` is on
-— it's the one to compare the primary against.
+means the official source is working. `Gust (Open-Meteo ICON)` is populated
+whenever `openmeteo_mode: always` (fetched alongside the primary every cycle —
+the one to compare the primary against), or only during a MeteoSwiss outage
+under `fallback_only`; under `never` it's always Unknown.
 
 **Sensor vs Diagnostic.** Home Assistant splits entities into two groups.
 *Primary* entities (no category) are the ones you act on: the recommendation,
@@ -275,9 +296,9 @@ Other sensors don't carry attributes (to keep the recorder small).
 
 Each gust source is exposed as its own diagnostic sensor so you can see which
 one drove a retract: `sensor.swiss_meteo_shade_gust_official`,
-`sensor.swiss_meteo_shade_gust_app`, and (if `use_openmeteo` is on)
-`sensor.swiss_meteo_shade_gust_openmeteo`. The `forecast_gust` sensor is the
-maximum across them — the value the decision actually uses.
+`sensor.swiss_meteo_shade_gust_app`, and (if `openmeteo_mode` fetched it this
+cycle) `sensor.swiss_meteo_shade_gust_openmeteo`. The `forecast_gust` sensor is
+the maximum across them — the value the decision actually uses.
 
 ---
 
@@ -286,13 +307,23 @@ maximum across them — the value the decision actually uses.
 Extend the awning when safe, retract on the override:
 
 ```yaml
-# Trigger on the single recommendation sensor, plus on HA start so the covers
-# are reconciled to the current recommendation after a reboot.
+# Trigger on the recommendation sensor, on each hazard appearing, and on HA
+# start so the covers are reconciled to the current recommendation after a
+# reboot.
 alias: Shade follows the weather
 triggers:
   - trigger: state
     entity_id: sensor.swiss_meteo_shade_shade_recommendation
     to: ["extend", "backup", "none"]   # real changes only, never attribute updates
+  # A NEW hazard re-asserts the recommendation even when the recommendation
+  # itself does not change -- see "Manual overrides" below. Without these two,
+  # an awning you put back out by hand stays out when rain arrives.
+  - trigger: state
+    entity_id: binary_sensor.swiss_meteo_shade_rain_within_10_min
+    to: "on"
+  - trigger: state
+    entity_id: binary_sensor.swiss_meteo_shade_wind_high
+    to: "on"
   - trigger: homeassistant
     event: start                        # re-apply current state after a reboot
 conditions:
@@ -332,6 +363,30 @@ actions:
 > Now each branch drives the backup blind to its correct position, and the
 > `homeassistant: start` trigger re-applies the right state after a reboot
 > instead of leaving whatever survived the restart.
+
+### Manual overrides, and why the hazard triggers matter
+
+This add-on publishes *recommendations*; your automation moves the covers. It
+has no idea what position they are actually in, so if you extend the awning by
+hand against a `backup` recommendation, nothing here fights you. That is
+deliberate — but it needs one safeguard.
+
+`retract` is true when **wind is high OR rain is coming**, and
+`Shade recommendation` collapses both into the same `backup` value. So if it is
+already `backup` because of wind and rain then arrives, the recommendation does
+**not** change — there is no state transition, and an automation watching only
+that sensor never re-fires. An awning you had manually put back out would sit
+there through the rain.
+
+The `Rain within 10 min` and `Wind high` triggers close that hole: each new
+hazard re-runs the automation, which re-applies the current recommendation and
+brings the awning back in. Because they fire only on a hazard turning **on**,
+they don't nag you while conditions are merely unchanged — a manual override
+survives until something genuinely new shows up, and then safety wins.
+
+If you would rather your manual override always stick until you undo it, drop
+those two triggers. Then nothing re-asserts until the recommendation itself
+changes — at the cost of the rain case above.
 
 Alert when running on the unofficial fallback:
 
@@ -399,8 +454,12 @@ you would rather it didn't. Because the gust used is the max across sources, the
 system errs toward retracting — the safe direction.
 
 `lookahead_hours` widens or narrows how far ahead the gust/sun outlook reaches.
-2 hours suits "should the awning be out right now". Increase it for earlier
-warning at the cost of more cautious behaviour.
+The window is always "now − 1h" to "now + lookahead_hours", so it always
+includes the current hour regardless of this setting — what it controls is how
+many hours *before* a forecast hour the system starts reacting to it. 1 (the
+default) reacts only once a windy/sunny hour is at most 1h away; raising it
+trades earlier warning of a genuine event for retracting further ahead of an
+hour that may turn out to be a forecast miss.
 
 ---
 
@@ -529,10 +588,21 @@ upstream.
 | `dup_probe.py` | Are same-key duplicate points identical rows or different places? |
 | `timing_probe.py` | What is the app forecast's array anchored to? |
 | `tz_probe.py --point <id>` | Reconfirm the forecast timezone against sunrise. |
+| `precip_probe.py --lv95 E,N` | Could the app's precipitation stand in for the radar? Puts both side by side for the same place and moment. (Answer so far: no — see below.) |
 
 `rain_forensics.py` is the one you're most likely to want: if the awning ever
 moves and you can't see why, it reconstructs that exact cycle from the public
 archive.
+
+**Why there is no rain fallback when the radar is down.** The app feed does
+carry precipitation, so it looks like an obvious stand-in — it isn't, and
+`precip_probe.py` is what settled it. Measured against the radar during real
+rain, the app's 10-minute series read **0.0 while the radar saw 9.35 mm/h**
+during a fast-moving shower — precisely the situation the awning cares about —
+and on another occasion its 10-minute and hourly series contradicted each
+other for the same hour. A source that confident and that wrong is worse than
+admitting ignorance, which is what `radar_fail_safe` does. Re-run the probe
+during rain if you want to check whether MeteoSwiss has improved it.
 
 ---
 
@@ -605,6 +675,11 @@ rather than leaving stale values.
 
 **`Forecast source` reads `app`** — the official forecast was unreachable and
 the app feed is in use. Usually transient.
+
+**"postcode … has no app forecast data" in the log** — that postcode isn't
+covered by the app feed, so the fallback can't work. Everything still runs on
+the official source; set `plz` to a neighbouring postcode to restore the
+fallback.
 
 **`awning_extend` never turns on** — check `sun_expected`; if the sunshine
 forecast reads low, it may simply be a cloudy stretch. Confirm `forecast_gust`

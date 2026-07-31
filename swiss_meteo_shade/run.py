@@ -29,6 +29,7 @@ import requests
 
 sys.path.insert(0, "/app")
 import events     # noqa: E402
+import forecast   # noqa: E402
 import shade      # noqa: E402
 
 _WIND_STATE_FILE = "/data/wind_high.json"
@@ -78,6 +79,19 @@ def _num(value, default, cast, name):
         return default
 
 
+def _choice(value, default, choices, name):
+    """Cast an option to one of a fixed set of strings, falling back to
+    default with a warning on anything else -- a typo must not crash the
+    container on boot."""
+    if value in (None, ""):
+        return default
+    if value in choices:
+        return value
+    print(f"WARNING: option {name}={value!r} is not one of {choices}; "
+          f"using default {default!r}", flush=True)
+    return default
+
+
 def _opt_or_none(value, cast, name):
     """Like _num but empty/None means 'feature off' (returns None)."""
     if value in (None, "", 0, "0"):
@@ -108,9 +122,10 @@ def apply_options(opts):
     # _opt_or_none (which treats 0 as "off"). Only None / "" disable it.
     _mt = g("min_temp_c")
     shade.MIN_TEMP_C = _num(_mt, None, float, "min_temp_c") if _mt not in (None, "") else None
-    shade.USE_OPENMETEO = bool(g("use_openmeteo", True))
+    shade.OPENMETEO_MODE = _choice(g("openmeteo_mode"), "always",
+                                   forecast.OPENMETEO_MODES, "openmeteo_mode")
     shade.PREFER_APP = bool(g("prefer_app_forecast", False))
-    shade.LOOKAHEAD_H = _num(g("lookahead_hours"), 2, int, "lookahead_hours")
+    shade.LOOKAHEAD_H = _num(g("lookahead_hours"), 1, int, "lookahead_hours")
     shade.RADAR_THRESHOLD_MMH = _num(g("radar_threshold_mmh"), 0.1, float,
                                      "radar_threshold_mmh")
     shade.RADAR_TOLERANCE_KM = _num(g("radar_tolerance_km"), 1, int,
@@ -118,7 +133,6 @@ def apply_options(opts):
     shade.INTERVAL_SECONDS = _num(g("interval_seconds"), 300, int,
                                   "interval_seconds")
     shade.RADAR_FAIL_SAFE = bool(g("radar_fail_safe", False))
-    import forecast
     forecast.FORECAST_MAX_CACHE_MINUTES = _num(g("forecast_max_cache_minutes"),
                                                60, int, "forecast_max_cache_minutes")
     shade.SUN_MIN_AWNING = _num(g("sun_min_awning"), 20, int, "sun_min_awning")
@@ -245,7 +259,18 @@ def main():
             f"(read them off https://map.geo.admin.ch/).")
 
     session = requests.Session()
-    session.headers["User-Agent"] = "swiss-meteo-shade/1.0"
+    session.headers["User-Agent"] = USER_AGENT
+
+    # The app feed is the designated forecast fallback, but some postcodes
+    # carry no data at all. Surface that now, at configuration time, instead
+    # of during an official-source outage months later. An inconclusive check
+    # (network down at boot) returns None and stays quiet.
+    if forecast.validate_plz(shade.PLZ, session) is False:
+        _warn_plz = (f"postcode {shade.PLZ} has no app forecast data -> the "
+                     f"app fallback will be unavailable if the official "
+                     f"source fails. Check the plz option.")
+        print(f"WARNING: {_warn_plz}", flush=True)
+        events.warn(_warn_plz)
 
     client = make_client()
     host, port = connect(client)
