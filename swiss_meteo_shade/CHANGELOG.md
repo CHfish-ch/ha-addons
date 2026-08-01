@@ -5,7 +5,15 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
-## Unreleased
+## 1.2.2 - 2026-08-01
+
+### Added
+
+- The MQTT device page now links straight to this add-on's configuration page.
+  The add-on and its device are one thing but appear in two unrelated places in
+  Home Assistant; the link makes the relationship visible. Costs no extra
+  add-on permission, and is skipped silently if the Supervisor can't be
+  reached.
 
 ### Changed
 

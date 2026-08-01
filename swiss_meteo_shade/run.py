@@ -153,6 +153,30 @@ def apply_options(opts):
                                      "sun_min_independent")
 
 
+def addon_slug():
+    """This add-on's Supervisor slug, or None if it can't be determined.
+
+    Used to deep-link the MQTT device at its own configuration page, so the
+    device and the add-on don't look like two unrelated things. The slug is
+    NOT the one in config.yaml: a repository install gets a repo-hash prefix
+    and a local install gets `local_`, so it has to be read at runtime.
+
+    `/addons/self/*` is reachable without `hassio_api`, so this costs no extra
+    permission. Purely cosmetic, hence never fatal.
+    """
+    token = os.environ.get("SUPERVISOR_TOKEN")
+    if not token:
+        return None
+    try:
+        r = requests.get("http://supervisor/addons/self/info",
+                         headers={"Authorization": f"Bearer {token}"},
+                         timeout=10)
+        r.raise_for_status()
+        return r.json()["data"]["slug"]
+    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return None
+
+
 def mqtt_credentials():
     """Fetch broker host/port/user/pass (and ssl flag) from the Supervisor."""
     token = os.environ.get("SUPERVISOR_TOKEN")
@@ -283,6 +307,13 @@ def main():
                      f"source fails. Check the plz option.")
         print(f"WARNING: {_warn_plz}", flush=True)
         events.warn(_warn_plz)
+
+    # Link the MQTT device to this add-on's own page. Must be set BEFORE
+    # connect(): _on_connect announces discovery, which reads shade.DEVICE.
+    _slug = addon_slug()
+    if _slug:
+        shade.DEVICE["configuration_url"] = (
+            f"homeassistant://hassio/addon/{_slug}/config")
 
     client = make_client()
     host, port = connect(client)

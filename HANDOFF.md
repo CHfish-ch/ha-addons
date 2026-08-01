@@ -24,7 +24,8 @@ correct.
 │   ├── README.md            shown on the install page
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
 ├── tests/                   conftest + test_logic, test_events, test_events_entity,
-│                            test_radar, test_imports, test_options, test_forecast
+│                            test_radar, test_imports, test_options, test_forecast,
+│                            test_device_link
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -58,7 +59,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.2.1. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.2.2. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -230,6 +231,24 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   "Manual overrides" in README. A `retract_reasons` sensor was considered as
   the alternative and deferred: it adds a 21st entity to save two trigger
   lines, and entities are far easier to add than to remove (see below).
+- **MQTT stays; getting rid of it means writing an integration.** Only code
+  running inside Home Assistant can register real entities. An add-on is a
+  separate container, so its only channels are MQTT discovery, the REST API,
+  or WebSocket — and the REST route (`POST /api/states/...`) creates states
+  that are NOT in the entity registry: they vanish on restart, can't be
+  renamed, assigned to an area, or grouped into a device. Strictly worse.
+  Evaluated 2026-08-01. The alternatives are a full `custom_components`
+  rewrite (HACS; numpy and h5py both ship musllinux wheels now, so deps are no
+  longer the blocker — but the radar's 30 MB HDF5 parse and FFT would need an
+  executor, container isolation is lost, and the test suite is rebuilt), or an
+  add-on plus a thin integration polling it over HTTP. Both change entity
+  `unique_id`s, so without first clearing the retained MQTT discovery configs
+  Home Assistant appends `_2` and every existing automation silently points at
+  a dead entity. Chosen instead: `configuration_url` on the device, deep-
+  linking to the add-on page (`homeassistant://hassio/addon/<slug>/config`).
+  The slug must come from `/addons/self/info` at runtime — a repository
+  install is hash-prefixed and a local one is `local_`, so config.yaml's slug
+  is the wrong value. That endpoint needs no `hassio_api` permission.
 - The add-on **never knows the actual cover position** and never commands the
   covers. Any "did the user override us?" logic would be guesswork; keep the
   decision one-way (publish a recommendation) and let the automation own it.
@@ -290,7 +309,7 @@ config changes came out of the investigation:
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options + 5 forecast, all passing; no external deps beyond
+- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options + 5 forecast + 5 device-link, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
