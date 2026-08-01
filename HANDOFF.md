@@ -59,7 +59,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.2.3. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.3.0. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -267,6 +267,36 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   the app page (`…/hassio/addon/<slug>/config`); it doubles as the
   local-vs-repository test, since `local_` never updates from GitHub.
   Documented in the README so it is answered before it is asked.
+- **1.3.0 is the first public release; nothing before it is supported.** The
+  add-on was never shared during 1.0.x–1.2.x, so no installation of those
+  versions exists anywhere. Consequences, both deliberate:
+  (a) `CHANGELOG.md` was collapsed from nine releases into one 1.3.0 entry —
+  the Changelog tab was leading new users with fixes to bugs in versions they
+  could never have run, which reads badly and is pure noise. The real history
+  is in git and in this file, where it is useful to a maintainer rather than
+  an installer.
+  (b) The `use_openmeteo` → `openmeteo_mode` carry-over in `apply_options` was
+  removed with its tests. It was also of uncertain reachability: the
+  Supervisor validates stored options against the current schema *before*
+  `run.py` runs, so if it strips unknown keys the migration could never fire.
+  **Don't add migration code for a pre-1.3.0 config** — there is no such
+  config. From 1.3.0 on, normal deprecation applies again.
+  User-facing docs (README/DOCS) should describe the add-on **as it is now**,
+  never as a diff against an earlier version. Past defects belong here.
+- **Window orientation is deliberately NOT an add-on option.** The decision is
+  "is it sunny and safe", which is identical for every window on the building;
+  whether the sun is on a *particular* facade is per-cover, and users routinely
+  have several facing different ways. Encoding one orientation in the options
+  would serve one cover and mislead the rest, and `sun.sun` already carries
+  `azimuth`/`elevation` for free. Documented as automation conditions in the
+  README instead (1.3.0). If this is ever revisited, note the same trap that
+  applies to the hazard triggers: sun *conditions* without matching *triggers*
+  leave the awning out after the sun moves off, because the recommendation
+  itself does not change as the sun crosses a threshold.
+  Solar figures in that section were checked against computed positions for
+  47°N (summer azimuth ~55→305, peak elevation ~66°; winter ~127→234, ~20°) —
+  a first draft taken from 3-hourly samples understated both spans, so
+  re-derive rather than trusting round numbers.
 - The add-on **never knows the actual cover position** and never commands the
   covers. Any "did the user override us?" logic would be guesswork; keep the
   decision one-way (publish a recommendation) and let the automation own it.
@@ -327,7 +357,7 @@ config changes came out of the investigation:
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options + 5 forecast + 9 device-link, all passing; no external deps beyond
+- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 4 options + 5 forecast + 9 device-link, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).

@@ -328,8 +328,8 @@ Other sensors don't carry attributes (to keep the recorder small).
 per new event rather than holding a value, and carry the text in a `message`
 attribute — so an automation is a plain trigger with no timestamp arithmetic
 (see Step 7). They stay silent for repeats of the same condition and across
-restarts. The `Last error` / `Last warning` sensors remain for existing
-automations and for seeing at a glance *when* something last went wrong.
+restarts. The `Last error` / `Last warning` sensors cover the other question —
+seeing at a glance *when* something last went wrong.
 
 Each gust source is exposed as its own diagnostic sensor so you can see which
 one drove a retract: `sensor.swiss_meteo_shade_gust_official`,
@@ -395,9 +395,9 @@ actions:
 ```
 
 > **Why every branch sets the backup blind explicitly:** a closed cover stays
-> closed. The earlier version closed the backup blind in the `backup` branch but
-> never reopened it, so once wind or rain triggered it, it stayed down forever.
-> Now each branch drives the backup blind to its correct position, and the
+> closed. If only the `backup` branch touched it, wind or rain would put it
+> down once and nothing would ever raise it again. Each branch therefore
+> drives the backup blind to its correct position, and the
 > `homeassistant: start` trigger re-applies the right state after a reboot
 > instead of leaving whatever survived the restart.
 
@@ -424,6 +424,100 @@ survives until something genuinely new shows up, and then safety wins.
 If you would rather your manual override always stick until you undo it, drop
 those two triggers. Then nothing re-asserts until the recommendation itself
 changes — at the cost of the rain case above.
+
+### Only shade when the sun is actually on that window
+
+This add-on answers *"is it sunny, and is it safe"* — it has no idea which way
+your window faces. On a clear day it says `extend` from sunrise to sunset, so
+a west-facing awning would go out at breakfast, hours before any sun reaches
+it. Home Assistant's built-in `sun.sun` entity closes that gap; no extra
+integration needed.
+
+It carries two attributes:
+
+| Attribute | Meaning |
+| --- | --- |
+| `elevation` | Height of the sun above the horizon, in degrees. **Negative when it is below** — so `elevation > 0` simply means "the sun is up". |
+| `azimuth` | Compass direction of the sun, in degrees **clockwise from north**: `0` = N, `90` = E, `180` = S (solar noon), `270` = W. |
+
+Through the day the azimuth climbs steadily: sunrise in the east, `180` due
+south around midday, sunset in the west.
+
+**The rule:** a wall gets direct sun while the sun's azimuth is within **±90°
+of the direction that wall faces**. East faces `90`, so `0`–`180`; south faces
+`180`, so `90`–`270`; west faces `270`, so `180`–`360`. Anything in between —
+a south-west facade at `225` — follows the same arithmetic.
+
+Which attribute actually does the work is different at each end of the day:
+
+| Window faces | Sun arrives when… | Sun leaves when… |
+| --- | --- | --- |
+| **East** (`90`) | it rises — `elevation` goes above `0` | it swings south — `azimuth` passes `180` |
+| **South** (`180`) | `azimuth` passes `90` | `azimuth` passes `270` |
+| **West** (`270`) | it swings past south — `azimuth` passes `180` | it sets — `elevation` drops below `0` |
+
+So an **east** window is gated mainly on `elevation` (the sun is on that wall
+the moment it appears, so the only question is whether it is up), while a
+**west** window is gated mainly on `azimuth` (the sun is long since up, the
+question is whether it has come round yet). Each facade needs `elevation`
+*and* `azimuth` in practice — the table just shows which one moves first.
+
+Worth narrowing those edges, though: at exactly ±90° the sun grazes the glass
+edge-on and delivers almost nothing, so starting a west facade at `200` rather
+than `180` often matches what you actually feel.
+
+For scale, at Swiss latitudes (~47°N) the sun's azimuth sweeps roughly
+`55`→`305` across a summer day and climbs to about 66° elevation — but in
+midwinter it only manages `127`→`234`, peaking near 20°. An east or west gate
+that works in July can therefore leave a winter awning idle all day, because
+the sun never reaches that facade at all. That is usually the right outcome,
+and it is what `min_temp_c` is for anyway.
+
+Add the gate as conditions — for a **west-facing** awning:
+
+```yaml
+conditions:
+  - condition: numeric_state
+    entity_id: sun.sun
+    attribute: azimuth
+    above: 180          # sun has passed due south
+  - condition: numeric_state
+    entity_id: sun.sun
+    attribute: elevation
+    above: 5            # and is high enough to clear the neighbour's roof
+```
+
+> **Add matching triggers too, or it will not retract.** Conditions are only
+> examined when something already fired the automation. The recommendation
+> does not change as the sun moves, so without triggers on the same
+> thresholds the awning stays out long after the sun has left. For the
+> west-facing example, add both ends:
+>
+> ```yaml
+> triggers:
+>   - trigger: numeric_state
+>     entity_id: sun.sun
+>     attribute: azimuth
+>     above: 180        # sun arrives on this facade
+>   - trigger: numeric_state
+>     entity_id: sun.sun
+>     attribute: elevation
+>     below: 5          # sun drops away again
+> ```
+>
+> Same principle as the hazard triggers above: whatever threshold you put in a
+> condition needs a trigger on it, or nothing re-evaluates when it is crossed.
+
+**The numbers above are starting points, not your numbers.** Real facades are
+never exactly east or west, and a neighbouring roof, a tree, a balcony above,
+or a deep reveal all cut into the window. Your own values are easy to measure:
+open **Developer Tools → States**, filter for `sun.sun`, and read `azimuth` and
+`elevation` at the two moments that matter — when direct sun first touches the
+window, and when it leaves. Do it on a clear day, note both pairs, and use
+those. A minimum `elevation` is usually worth keeping even when the azimuth
+range is right: very low sun is often blocked by whatever is on the horizon,
+and when it does get through, it comes in under an awning rather than being
+stopped by it.
 
 Alert when running on the unofficial fallback:
 
@@ -465,41 +559,13 @@ actions:
 Swap `event.swiss_meteo_shade_error` for `event.swiss_meteo_shade_warning` for
 the softer channel.
 
-<details>
-<summary>Older sensor-based version (still works, but needs a careful
-condition)</summary>
-
-The `Last error` / `Last warning` **sensors** predate the event entities and
-still work, so existing automations keep running. They hold the event's
-*timestamp* as their state, which means the automation has to work out for
-itself whether the timestamp is genuinely new — without that condition you get
-re-notified about an old error on every Home Assistant restart, every add-on
-restart, and every availability blip:
-
-```yaml
-alias: Notify on shade error
-triggers:
-  - trigger: state
-    entity_id: sensor.swiss_meteo_shade_last_error   # state = event timestamp
-conditions:
-  # only when the timestamp changed to a real value -- not on startup, not on
-  # attribute churn, not when it's unknown/empty (no error recorded yet)
-  - condition: template
-    value_template: >-
-      {{ trigger.to_state.state not in ['unknown', 'unavailable', '', 'None']
-         and trigger.to_state.state != trigger.from_state.state }}
-actions:
-  - action: notify.persistent_notification
-    data:
-      title: "Swiss Meteo Shade error"
-      message: >-
-        {{ state_attr('sensor.swiss_meteo_shade_last_error',
-                      'last_error_message') }}
-```
-
-The event entities exist because that condition is easy to leave out, and its
-absence is not obvious until the spurious notifications start.
-</details>
+The `Last error` / `Last warning` **sensors** carry the same information as a
+timestamp you can look at, which is handy on a dashboard — but don't build
+notifications on them. Their state is *when* the message first appeared, so an
+automation would have to work out for itself whether that timestamp is
+genuinely new; get it wrong and you are re-notified about an old error on
+every Home Assistant restart and every availability blip. The `event` entities
+exist precisely so you never have to write that logic.
 
 **Repeats don't re-notify.** An event fires only when the message is genuinely
 new. A condition that persists for hours — a stale radar, a forecast stuck on
@@ -600,12 +666,12 @@ when a file is unchanged — verified against the live service — so an unchang
 `last_warning` diagnostics are persisted to `/data` so they survive a restart.
 
 **Nowcast honesty.** The rain projection only advects when there is real echo
-to track. Phase correlation on a clear sky returns a large, random vector (a
-cloudless afternoon once produced ~90 km/h pointing two different ways between
-overlapping frames), which would sample a cell 10-20 km away and could pick up
-marginal echo that was never approaching. With nothing to track the app uses
-zero motion, which is also physically right: no echo nearby means nothing can
-arrive within the lead time.
+to track. Phase correlation on a clear sky returns a large, random vector —
+readings equivalent to ~90 km/h pointing in two different directions between
+overlapping frames are typical — which would sample a cell 10–20 km away and
+could pick up marginal echo that was never approaching. With nothing to track
+the app uses zero motion, which is also physically right: no echo nearby means
+nothing can arrive within the lead time.
 
 ## Correctness notes
 

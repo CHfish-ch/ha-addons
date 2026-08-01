@@ -124,18 +124,7 @@ def apply_options(opts):
     # _opt_or_none (which treats 0 as "off"). Only None / "" disable it.
     _mt = g("min_temp_c")
     shade.MIN_TEMP_C = _num(_mt, None, float, "min_temp_c") if _mt not in (None, "") else None
-    # 1.1.0 replaced the use_openmeteo bool with openmeteo_mode. A config saved
-    # before that still carries the old key, and silently defaulting it to
-    # "always" would flip a deliberate `false` into fully ON -- the opposite of
-    # what was configured. Honour the old key when the new one is absent.
-    _om = g("openmeteo_mode")
-    if _om in (None, "") and "use_openmeteo" in opts:
-        _om = "always" if bool(g("use_openmeteo")) else "never"
-        print(f"WARNING: option use_openmeteo is deprecated and was replaced "
-              f"by openmeteo_mode; carrying it over as {_om!r}. Set "
-              f"openmeteo_mode in the Configuration tab to silence this.",
-              flush=True)
-    shade.OPENMETEO_MODE = _choice(_om, "always",
+    shade.OPENMETEO_MODE = _choice(g("openmeteo_mode"), "always",
                                    forecast.OPENMETEO_MODES, "openmeteo_mode")
     shade.PREFER_APP = bool(g("prefer_app_forecast", False))
     shade.LOOKAHEAD_H = _num(g("lookahead_hours"), 1, int, "lookahead_hours")

@@ -1,9 +1,9 @@
-"""Tests for option parsing and upgrade migration in run.py.
+"""Tests for option parsing in run.py.
 
-These matter because options come from a file written by an EARLIER version of
-the add-on: a rename that reads fine on a fresh install can silently invert a
-returning user's setting. Verified behaviourally rather than by inspection --
-1.1.0 shipped a crash that passed both py_compile and the whole test suite.
+Options arrive from a file the user edits through the Configuration screen, so
+a typo must warn and fall back to the default rather than crash the container
+on boot. Checked behaviourally: a bad value has to produce the right effective
+setting, not merely fail to raise.
 """
 import os
 import sys
@@ -32,22 +32,6 @@ def test_new_option_is_honoured():
 
 def test_default_is_always_when_nothing_stored():
     assert _apply() == "always"
-
-
-def test_legacy_use_openmeteo_false_maps_to_never():
-    """The regression: a deliberate opt-out must not become fully ON."""
-    assert _apply(use_openmeteo=False) == "never"
-
-
-def test_legacy_use_openmeteo_true_maps_to_always():
-    assert _apply(use_openmeteo=True) == "always"
-
-
-def test_new_option_wins_over_legacy_key():
-    """Once the user sets the new option, the stale key must not override it."""
-    assert _apply(openmeteo_mode="fallback_only", use_openmeteo=True) \
-        == "fallback_only"
-    assert _apply(openmeteo_mode="never", use_openmeteo=True) == "never"
 
 
 def test_invalid_value_falls_back_to_default():
