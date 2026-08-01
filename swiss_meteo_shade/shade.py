@@ -61,6 +61,12 @@ _STATE_TOPIC = f"{MQTT_BASE}/state"
 _AVAIL_TOPIC = f"{MQTT_BASE}/availability"
 _DIAG_AVAIL_TOPIC = f"{MQTT_BASE}/availability_diag"
 _EVENTS_TOPIC = f"{MQTT_BASE}/events"   # small payload: only event fields
+# `event` entities fire once per NEW event instead of holding a value, so an
+# automation needs no timestamp arithmetic. Published non-retained, and Home
+# Assistant discards replayed retained messages anyway, so neither a restart
+# nor a reconnect can re-announce an old error.
+_EVENT_ERROR_TOPIC = f"{MQTT_BASE}/event/error"
+_EVENT_WARNING_TOPIC = f"{MQTT_BASE}/event/warning"
 
 
 def _lv95_to_wgs84(e, n):
@@ -252,6 +258,15 @@ SENSORS = [
      "diagnostic"),
 ]
 
+# (slug, friendly, topic, event_type) -- the `event` platform. Diagnostic, and
+# deliberately WITHOUT expire_after: events are sporadic by nature, and an
+# entity that goes unavailable between them would break automations that
+# trigger on it.
+EVENT_ENTITIES = [
+    ("event_error", "Error", _EVENT_ERROR_TOPIC, "error"),
+    ("event_warning", "Warning", _EVENT_WARNING_TOPIC, "warning"),
+]
+
 # numeric sensors need value_template guards so JSON null doesn't become "None"
 _NULLABLE_STR = {"forecast_source"}   # B8: else Jinja renders the string "None"
 _NUMERIC = {"gust_kmh", "sunshine_minutes", "temp_c", "radar_age_min",
@@ -326,8 +341,63 @@ def announce_discovery(client):
                 "{{ value_json.%s if value_json.%s else '' }}" % (key, key))
         pub("sensor", slug, cfg, diagnostic=(cat == "diagnostic"))
 
+    for slug, name, topic, etype in EVENT_ENTITIES:
+        # No expire_after and no state value template: the `event` platform
+        # takes the payload's event_type itself, and every other key in the
+        # payload becomes an attribute (that is where `message` arrives).
+        cfg = {"name": name, "state_topic": topic, "event_types": [etype],
+               "entity_category": "diagnostic",
+               "availability_topic": _DIAG_AVAIL_TOPIC,
+               "unique_id": f"sms_{slug}", "device": DEVICE,
+               "origin": {"name": "Swiss Meteo Shade", "sw_version": VERSION}}
+        client.publish(f"homeassistant/event/sms_{slug}/config",
+                       json.dumps(cfg), retain=True, qos=1)
+
     # diagnostics are always online so they can explain an outage (B2)
     client.publish(_DIAG_AVAIL_TOPIC, "online", retain=True, qos=1)
+
+
+_event_seen = {"error": None, "warning": None}
+_event_seeded = False
+
+# (event_type, state key holding its timestamp, state key holding its message,
+#  topic to fire on)
+_EVENT_FIELDS = (
+    ("error", "last_error_time", "last_error_message", _EVENT_ERROR_TOPIC),
+    ("warning", "last_warning_time", "last_warning_message",
+     _EVENT_WARNING_TOPIC),
+)
+
+
+def _publish_new_events(client, state):
+    """Fire the `event` entities, but only for genuinely NEW events.
+
+    The timestamp is when the CURRENT message first appeared, so an unchanged
+    timestamp means the same condition is merely recurring and must not fire
+    again -- a stale radar lasting hours notifies once, as with the sensors.
+
+    The first publish after a start only SEEDS the tracker and fires nothing:
+    events.py restores the last error/warning from /data, and announcing those
+    would re-report something from before this run every time the add-on
+    restarts. That is the exact trap the sensor-based automation needed a
+    hand-written template condition to avoid.
+    """
+    global _event_seeded
+    if not _event_seeded:
+        for kind, tkey, _mkey, _topic in _EVENT_FIELDS:
+            _event_seen[kind] = state.get(tkey)
+        _event_seeded = True
+        return
+    for kind, tkey, mkey, topic in _EVENT_FIELDS:
+        stamp = state.get(tkey)
+        if not stamp or stamp == _event_seen[kind]:
+            continue
+        _event_seen[kind] = stamp
+        client.publish(topic, json.dumps({
+            "event_type": kind,
+            "message": state.get(mkey),
+            "time": stamp,
+        }), retain=False, qos=1)      # never retained: no replay on reconnect
 
 
 def publish_state(client, state):
@@ -352,6 +422,9 @@ def publish_state(client, state):
             info.wait_for_publish(timeout=10)
         except Exception:
             pass
+    # after the state is on the wire, so an automation reacting to the event
+    # sees the matching sensor values already updated
+    _publish_new_events(client, state)
 
 
 if __name__ == "__main__":

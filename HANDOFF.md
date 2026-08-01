@@ -23,7 +23,8 @@ correct.
 │   ├── translations/en.yaml option names + descriptions for the config screen
 │   ├── README.md            shown on the install page
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
-├── tests/                   conftest.py + test_logic, test_events, test_radar, test_imports, test_options
+├── tests/                   conftest + test_logic, test_events, test_events_entity,
+│                            test_radar, test_imports, test_options
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -57,7 +58,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.1.1. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.2.0. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -92,7 +93,8 @@ there are conditions where neither fires (intended).
   SIGTERM/SIGINT, watchdog exit after repeated failures, hysteresis persistence
   to `/data`.
 - `shade.py` — calls radar + forecast, applies the three sun thresholds, builds
-  the state dict, publishes MQTT discovery for 20 entities.
+  the state dict, publishes MQTT discovery for 22 entities (20 sensors +
+  2 `event` entities).
 - `forecast.py` — gust/sun/temp from official OGD + app fallback + Open-Meteo,
   plus the conditional-GET cache.
 - `logic.py` — pure decision function, no I/O, fully unit-testable.
@@ -200,6 +202,22 @@ These cost real effort to establish. Each was wrong-guessed at least once.
 - Event sensors: state is the timestamp of when the current message **first**
   appeared; repeats don't update it. Attributes come from a dedicated small
   topic. Both exist so a persistent condition notifies once, not every cycle.
+- **`event` entities (1.2.0) are the automation surface; the `last_error` /
+  `last_warning` sensors are kept for display and for existing automations.**
+  The sensors put the burden of "is this timestamp actually new?" on a
+  hand-written template condition, which a real user simply left out — the
+  symptom (re-notified about an old error on every restart) is not obvious.
+  `event` entities fire once per new event and carry `message` as an
+  attribute, so the automation is a bare trigger.
+  Firing rules live in `shade._publish_new_events` and are locked by
+  `tests/test_events_entity.py`: published **non-retained** (HA discards
+  replayed retained messages for this platform anyway), skipped when the
+  timestamp is unchanged, and the **first publish after a start only seeds the
+  tracker** — events.py restores the last error/warning from `/data`, and
+  firing those would re-announce them on every restart.
+  The sensors were NOT removed: MQTT discovery configs are retained, so
+  removal needs an empty retained payload per entity, and it would break
+  automations already in the wild.
 - Motion estimation is **gated on real echo** — see below.
 - **`recommendation` deliberately collapses wind and rain into one `backup`
   value**, so it does NOT change when rain is added to an existing wind
@@ -268,11 +286,11 @@ config changes came out of the investigation:
 
 ## Current state
 
-- 20 MQTT entities. Operational: recommendation, the three shade decisions, and
+- 22 MQTT entities. Operational: recommendation, the three shade decisions, and
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 5 radar + 4 imports/manifest + 7 options, all passing; no external deps beyond
+- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).

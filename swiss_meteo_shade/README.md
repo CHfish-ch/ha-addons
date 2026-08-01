@@ -294,6 +294,14 @@ The two event sensors (`last_error`, `last_warning`) carry the full state as
 attributes; the message lives in `last_error_message` / `last_warning_message`.
 Other sensors don't carry attributes (to keep the recorder small).
 
+**Events (the ones to automate on):** `event.swiss_meteo_shade_error` and
+`event.swiss_meteo_shade_warning`. Unlike the sensors above, these *fire* once
+per new event rather than holding a value, and carry the text in a `message`
+attribute — so an automation is a plain trigger with no timestamp arithmetic
+(see Step 7). They stay silent for repeats of the same condition and across
+restarts. The `Last error` / `Last warning` sensors remain for existing
+automations and for seeing at a glance *when* something last went wrong.
+
 Each gust source is exposed as its own diagnostic sensor so you can see which
 one drove a retract: `sensor.swiss_meteo_shade_gust_official`,
 `sensor.swiss_meteo_shade_gust_app`, and (if `openmeteo_mode` fetched it this
@@ -405,7 +413,39 @@ actions:
 Add `for: "00:05:00"` to control triggers if you want to ignore brief flips near
 a threshold.
 
-Notify when a new error or warning is recorded:
+Notify when a new error or warning is recorded. Use the **`event` entities** —
+they fire once per new event and carry the message as an attribute, so no
+timestamp comparison is needed:
+
+```yaml
+alias: Notify on shade error
+triggers:
+  - trigger: state
+    entity_id: event.swiss_meteo_shade_error
+conditions:
+  # skip the entity's initial 'unknown' when it is first created
+  - condition: template
+    value_template: "{{ trigger.to_state.state not in ['unknown', 'unavailable'] }}"
+actions:
+  - action: notify.persistent_notification
+    data:
+      title: "Swiss Meteo Shade error"
+      message: "{{ trigger.to_state.attributes.message }}"
+```
+
+Swap `event.swiss_meteo_shade_error` for `event.swiss_meteo_shade_warning` for
+the softer channel.
+
+<details>
+<summary>Older sensor-based version (still works, but needs a careful
+condition)</summary>
+
+The `Last error` / `Last warning` **sensors** predate the event entities and
+still work, so existing automations keep running. They hold the event's
+*timestamp* as their state, which means the automation has to work out for
+itself whether the timestamp is genuinely new — without that condition you get
+re-notified about an old error on every Home Assistant restart, every add-on
+restart, and every availability blip:
 
 ```yaml
 alias: Notify on shade error
@@ -428,20 +468,21 @@ actions:
                       'last_error_message') }}
 ```
 
-**Repeats don't re-notify.** The sensor's state is the timestamp of when the
-current message *first* appeared, and it stays put while that same message keeps
-recurring. A condition that persists for hours — a stale radar, a forecast on
-its fallback — therefore notifies **once**, not every cycle. The attributes come
-from a small dedicated topic carrying only the message and that timestamp, so
-nothing churns between cycles either. Every individual occurrence is still
-timestamped in the add-on **Log**, and a genuinely different message updates the
-sensor and notifies again.
+The event entities exist because that condition is easy to leave out, and its
+absence is not obvious until the spurious notifications start.
+</details>
 
-Swap `last_error` for `last_warning` for the softer channel. The condition is
-still worth keeping: the trigger alone fires on every state publish (including attribute
-updates each cycle), so without the guard you would get a notification every
-few minutes reading "Unknown". The condition restricts it to an actual new
-event whose timestamp differs from the previous one.
+**Repeats don't re-notify.** An event fires only when the message is genuinely
+new. A condition that persists for hours — a stale radar, a forecast stuck on
+its fallback — therefore notifies **once**, not every cycle. Every individual
+occurrence is still timestamped in the add-on **Log**.
+
+**A restart doesn't re-notify either.** The add-on remembers the last
+error/warning across restarts (they're persisted to `/data`), and on the first
+cycle after starting it only takes note of them — it never announces an event
+recorded before that run. Home Assistant also discards replayed retained
+messages for `event` entities, and these are published non-retained anyway, so
+a reconnecting broker can't resurrect an old one.
 
 ---
 

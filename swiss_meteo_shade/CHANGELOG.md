@@ -1,5 +1,28 @@
 # Changelog
 
+## 1.2.0 - 2026-08-01
+
+- Added two `event` entities, `Error` and `Warning`. They fire once per new
+  event and carry the text in a `message` attribute, so a notification
+  automation is now just a trigger and an action -- no timestamp comparison:
+
+      triggers:
+        - trigger: state
+          entity_id: event.swiss_meteo_shade_error
+      actions:
+        - action: notify.persistent_notification
+          data:
+            message: "{{ trigger.to_state.attributes.message }}"
+
+  They stay silent for repeats of the same condition, and never re-announce an
+  event from before the add-on started -- the case the sensor-based automation
+  needed a careful template condition to avoid.
+- The `Last error` / `Last warning` **sensors are unchanged** and existing
+  automations keep working. If you use them, check yours still has the
+  `conditions:` block from the README: without it you get re-notified about an
+  old error on every Home Assistant restart, add-on restart, and availability
+  blip.
+
 ## 1.1.1 - 2026-08-01
 
 - **Fixes a crash on startup in 1.1.0.** `run.py` used the User-Agent constant
