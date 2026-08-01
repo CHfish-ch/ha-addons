@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.2.1 - 2026-08-01
+
+- When the official forecast gives up on a parameter, the log and the `Last
+  warning` sensor now say why -- no asset in the item, a network failure, or
+  an HTTP status -- instead of only the downstream "primary forecast
+  unavailable". Riding the cache through a blip stays silent, as before.
+- Fixed: whether to download the ~30 MB temperature file was held in module
+  state, so once a cycle ran with the `min_temp_c` gate on, later cycles could
+  keep fetching it even with the gate off. It now follows the call.
+
 ## 1.2.0 - 2026-08-01
 
 - Added two `event` entities, `Error` and `Warning`. They fire once per new

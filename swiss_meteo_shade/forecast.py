@@ -243,8 +243,6 @@ FORECAST_MAX_CACHE_MINUTES = 60
 # Per-output sunshine thresholds now live in shade.py (sun_min_*). Here we
 # only decide known-vs-unknown: sunshine is None if no data, else the peak
 # minutes (shade applies each output's threshold).
-NEED_TEMP = False   # set True by shade when a min-temp gate is configured
-
 _file_meta = {}    # url -> {"etag": str|None, "hash": str, "time": datetime}
 _file_series = {}  # (url, point_id) -> list[(date_str, value_str)] for that point
 
@@ -344,6 +342,8 @@ def _fetch_forecast_param(session, point_id, param, lookahead_h, assets,
     href = next((a["href"] for n, a in assets.items()
                  if f".{param}." in n and n.endswith(".csv")), None)
     if not href:
+        events.warn(f"forecast parameter {param} has no asset in this item "
+                    f"-> official source incomplete")
         return None
 
     key = (href, str(point_id))   # point_id may be (id, type) tuple
@@ -362,18 +362,31 @@ def _fetch_forecast_param(session, point_id, param, lookahead_h, assets,
 
     try:
         r = session.get(href, timeout=90, headers=headers)
-    except requests.RequestException:
-        # network blip: serve cached rows if we have them, else give up
+    except requests.RequestException as exc:
+        # network blip: serve cached rows if we have them, else give up. Only
+        # the give-up case is worth a warning -- riding the cache through a
+        # blip is the cache doing its job, and gather() already reports the
+        # fallback that follows a real failure.
         rows = _file_series.get(key)
-        return _window_from_rows(rows, lookahead_h, back_hours) if rows else None
+        if rows:
+            return _window_from_rows(rows, lookahead_h, back_hours)
+        events.warn(f"forecast {param} download failed and nothing cached: "
+                    f"{type(exc).__name__}")
+        return None
 
     if r.status_code == 304 and not force:
         # unchanged -> reuse cached rows, just re-window against the clock
         return _window_from_rows(_file_series.get(key), lookahead_h, back_hours)
 
     if not r.ok:
+        # server refused (5xx, 403 on a not-yet-published file, ...): same
+        # policy as a network blip -- cache if we have it, otherwise say why.
         rows = _file_series.get(key)
-        return _window_from_rows(rows, lookahead_h, back_hours) if rows else None
+        if rows:
+            return _window_from_rows(rows, lookahead_h, back_hours)
+        events.warn(f"forecast {param} returned HTTP {r.status_code} and "
+                    f"nothing cached")
+        return None
 
     body = r.content
     new_hash = hashlib.sha256(body).hexdigest()
@@ -392,8 +405,13 @@ def _fetch_forecast_param(session, point_id, param, lookahead_h, assets,
     return _window_from_rows(rows, lookahead_h, back_hours)
 
 
-def from_official(lv95_e, lv95_n, session=None, lookahead_h=LOOKAHEAD_H):
-    """Return {'gust_kmh':float, 'sunshine':bool} from official OGD, or None."""
+def from_official(lv95_e, lv95_n, session=None, lookahead_h=LOOKAHEAD_H,
+                  need_temp=False):
+    """Return {'gust_kmh':float, 'sunshine':bool} from official OGD, or None.
+
+    need_temp is passed explicitly rather than read from module state: the
+    temperature file is another ~30 MB download, so "do we actually need it"
+    must follow the call, not linger from a previous one."""
     s = session or _session()
     try:
         point = _find_forecast_point(s, lv95_e, lv95_n)
@@ -411,7 +429,7 @@ def from_official(lv95_e, lv95_n, session=None, lookahead_h=LOOKAHEAD_H):
                         f"-> sunshine unknown this cycle")
         # C1b: only fetch temperature when the gate is actually on.
         temp = (_fetch_forecast_param(s, point, "tre200h0", lookahead_h, assets)
-                if NEED_TEMP else None)
+                if need_temp else None)
     except (requests.RequestException, ValueError):
         return None
     if gust is None and sun is None:
@@ -473,7 +491,7 @@ def from_openmeteo(lat, lon, session=None, lookahead_h=LOOKAHEAD_H):
 # ---------------------------------------------------------------------------
 def gather(plz, lv95_e, lv95_n, lat, lon, openmeteo_mode="always",
            prefer_app=False, lookahead_h=LOOKAHEAD_H, session=None,
-           need_temp=None):
+           need_temp=False):
     """Return the merged forecast signals and provenance.
 
     gust_kmh is the MAX across every source that answered -- the cautious
@@ -485,9 +503,6 @@ def gather(plz, lv95_e, lv95_n, lat, lon, openmeteo_mode="always",
     joins that max: 'always' (every cycle), 'fallback_only' (only when the
     MeteoSwiss official/app gust is unavailable this cycle), or 'never'.
     """
-    global NEED_TEMP
-    if need_temp is not None:
-        NEED_TEMP = need_temp
     s = session or _session()
     result = {
         "forecast_source": None,      # which source gave sunshine/primary gust
@@ -505,13 +520,13 @@ def gather(plz, lv95_e, lv95_n, lat, lon, openmeteo_mode="always",
     if prefer_app:
         fc = from_app(plz, s, lookahead_h)
         if fc is None:
-            fc = from_official(lv95_e, lv95_n, s, lookahead_h)
+            fc = from_official(lv95_e, lv95_n, s, lookahead_h, need_temp)
             result["on_backup"] = fc is not None
             result["forecast_source"] = "official" if fc else None
         else:
             result["forecast_source"] = "app"
     else:
-        fc = from_official(lv95_e, lv95_n, s, lookahead_h)
+        fc = from_official(lv95_e, lv95_n, s, lookahead_h, need_temp)
         if fc is None:
             fc = from_app(plz, s, lookahead_h)
             result["on_backup"] = fc is not None

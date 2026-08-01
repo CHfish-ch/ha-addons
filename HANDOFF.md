@@ -24,7 +24,7 @@ correct.
 │   ├── README.md            shown on the install page
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
 ├── tests/                   conftest + test_logic, test_events, test_events_entity,
-│                            test_radar, test_imports, test_options
+│                            test_radar, test_imports, test_options, test_forecast
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -58,7 +58,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.2.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.2.1. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -290,7 +290,7 @@ config changes came out of the investigation:
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options, all passing; no external deps beyond
+- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options + 5 forecast, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
@@ -355,6 +355,17 @@ config changes came out of the investigation:
   test proves otherwise.
 - Several review rounds flagged bugs that didn't exist, because the reviewer
   worked from a stale snapshot. Verify against the current file before fixing.
+  A 2026-08-01 review reported two bugs in `radar.py`, both false, and both
+  from **misreading a dict literal as an assignment**: it quoted
+  `result["speed_kmh"] = round(...),` and concluded the trailing comma built a
+  1-tuple, when the real line is `"speed_kmh": round(...),` inside
+  `result = { ... }` — an ordinary dict entry. It then wanted an `np is None`
+  guard there, but `read_rzc` raises `RuntimeError("numpy and h5py are
+  required...")` for every frame before that dict is built, so the guard would
+  be unreachable. Runtime check settles both in seconds:
+  `radar.evaluate()["speed_kmh"]` is a float. **Reproduce a claim before
+  acting on it** — a plausible-sounding diff can be flatly wrong about what
+  the file says.
 
 ## Running things
 
