@@ -362,6 +362,14 @@ config changes came out of the investigation:
   offering the update on its own with **no repo change and no `ha store
   reload`** (`git diff 0bd58cf..HEAD -- config.yaml Dockerfile version.py` is
   empty across that window).
+  **There are three independent staleness layers**, and they have each sent us
+  chasing a non-existent bug: (1) the Supervisor's repository pull, on a timer;
+  (2) its parsed copy of `config.yaml`; (3) the **frontend cache** — seen
+  2026-08-01 with `ha apps info` reporting 1.2.2 while the web UI still said
+  1.2.1. The Changelog tab reads the file live through all of this, which is
+  why it keeps contradicting the version numbers next to it. **`ha apps info`
+  is the authority** — it hits the Supervisor API directly, with no frontend
+  in the way; a hard browser reload (Ctrl/Cmd+Shift+R) clears layer 3.
   **Do not "fix" this by bumping the version again** — that publishes a release
   nobody needed and does not make the store refresh any sooner. Either wait, or
   force it with `ha store reload` from the SSH add-on (the CLI verb for add-ons
