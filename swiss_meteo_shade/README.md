@@ -13,10 +13,20 @@ sensors you can drive automations from:
 - Should the **independent blinds** close? (sunny — they have no weather
   vulnerability, so wind and rain are ignored)
 
-> **Names note.** Home Assistant 2026.2 renamed **Add-ons** to **Apps** in the
-> interface. Only the labels changed; technical paths such as `/addons` are
-> unchanged. This guide says *app*; on older Home Assistant you will see
-> *add-on* in the same places.
+> **Names note.** Home Assistant 2026.2 renamed **Add-ons** to **Apps**. This
+> guide says *app*; on older Home Assistant you will see *add-on* in the same
+> places. Filesystem paths such as `/addons` are unchanged, but the **CLI
+> command was renamed too** — it is `ha apps …`, not `ha addons …`, on 2026.2
+> and later. Run `ha apps --help` if a subcommand is not recognised.
+
+> **Finding your app's slug.** Several CLI commands want it, and it is **not**
+> `swiss_meteo_shade` — the Supervisor prefixes it: `local_swiss_meteo_shade`
+> for a manual `/addons` copy, or `<repo-hash>_swiss_meteo_shade` when
+> installed from this repository. The quickest way to read it is the browser
+> address bar on the app's own page:
+> `…/hassio/addon/<this-is-your-slug>/config`. A `local_` prefix also tells you
+> the copy will never update from GitHub — reinstall it from the repository if
+> you want updates.
 
 ---
 

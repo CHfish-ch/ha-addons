@@ -249,6 +249,12 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   The slug must come from `/addons/self/info` at runtime — a repository
   install is hash-prefixed and a local one is `local_`, so config.yaml's slug
   is the wrong value. That endpoint needs no `hassio_api` permission.
+  **This prefix bites users too, not just code**: `ha apps info
+  swiss_meteo_shade` fails with "doesn't exist", which reads like a broken
+  install. The fastest way to read the real slug is the browser address bar on
+  the app page (`…/hassio/addon/<slug>/config`); it doubles as the
+  local-vs-repository test, since `local_` never updates from GitHub.
+  Documented in the README so it is answered before it is asked.
 - The add-on **never knows the actual cover position** and never commands the
   covers. Any "did the user override us?" logic would be guesswork; keep the
   decision one-way (publish a recommendation) and let the automation own it.
@@ -358,7 +364,9 @@ config changes came out of the investigation:
   empty across that window).
   **Do not "fix" this by bumping the version again** — that publishes a release
   nobody needed and does not make the store refresh any sooner. Either wait, or
-  force it with `ha store reload` from the SSH add-on. Only start suspecting the
+  force it with `ha store reload` from the SSH add-on (the CLI verb for add-ons
+  themselves is `ha apps …` on 2026.2+, renamed with the UI; `ha store` is
+  unchanged). Only start suspecting the
   manifest if it never refreshes: `tests/test_imports.py` covers the config
   faults that genuinely make the Supervisor keep a cached copy.
 - **Renaming an option needs a migration, not just a schema edit.** Options

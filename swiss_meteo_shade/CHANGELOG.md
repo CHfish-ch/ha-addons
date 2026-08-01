@@ -5,6 +5,16 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## Unreleased
+
+### Notes
+
+- Documented that the `ha` CLI verb followed the 2026.2 rename — it is
+  `ha apps …`, not `ha addons …` — and that your app's slug is **not**
+  `swiss_meteo_shade`. The Supervisor prefixes it (`local_…` for a manual
+  copy, `<repo-hash>_…` from this repository), so bare-name CLI commands fail
+  with "doesn't exist". The README now says where to read the real one.
+
 ## 1.2.2 - 2026-08-01
 
 ### Added
