@@ -5,7 +5,15 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
-## Unreleased
+## 1.2.3 - 2026-08-01
+
+### Fixed
+
+- The device link added in 1.2.2 pointed at `/hassio/addon/<slug>/config`,
+  which is the pre-2026.2 route and lands on a dead page there. Home Assistant
+  2026.2 moved it to `/config/app/<slug>/config` as part of the Apps rename.
+  The route is now chosen from the running Core version, so both old and new
+  installs get a working link.
 
 ### Notes
 
@@ -14,6 +22,11 @@ alter how your covers move is called out explicitly.
   `swiss_meteo_shade`. The Supervisor prefixes it (`local_…` for a manual
   copy, `<repo-hash>_…` from this repository), so bare-name CLI commands fail
   with "doesn't exist". The README now says where to read the real one.
+- Explained why the app page has no link *to* its MQTT device, while the
+  device links back to the app. The app can read its own slug, but a device's
+  address is a registry ID only Home Assistant assigns, and fetching it would
+  need full Core API access for every user — not worth spending on a
+  hyperlink. Use Settings → Devices & Services → MQTT.
 
 ## 1.2.2 - 2026-08-01
 

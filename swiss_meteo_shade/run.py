@@ -10,6 +10,7 @@
 
 import json
 import os
+import re
 import sys
 import time
 import signal
@@ -153,28 +154,62 @@ def apply_options(opts):
                                      "sun_min_independent")
 
 
-def addon_slug():
-    """This add-on's Supervisor slug, or None if it can't be determined.
+def _supervisor_get(path):
+    """GET a Supervisor endpoint, or None on any failure.
 
-    Used to deep-link the MQTT device at its own configuration page, so the
-    device and the add-on don't look like two unrelated things. The slug is
-    NOT the one in config.yaml: a repository install gets a repo-hash prefix
-    and a local install gets `local_`, so it has to be read at runtime.
-
-    `/addons/self/*` is reachable without `hassio_api`, so this costs no extra
-    permission. Purely cosmetic, hence never fatal.
+    Only endpoints reachable WITHOUT `hassio_api` are used here
+    (`/addons/self/*` and `/info`), so this costs no extra permission. Every
+    caller is cosmetic, so a failure must never be fatal.
     """
     token = os.environ.get("SUPERVISOR_TOKEN")
     if not token:
         return None
     try:
-        r = requests.get("http://supervisor/addons/self/info",
+        r = requests.get(f"http://supervisor{path}",
                          headers={"Authorization": f"Bearer {token}"},
                          timeout=10)
         r.raise_for_status()
-        return r.json()["data"]["slug"]
-    except (requests.RequestException, ValueError, KeyError, TypeError):
+        return r.json().get("data")
+    except (requests.RequestException, ValueError, AttributeError):
         return None
+
+
+def addon_slug():
+    """This add-on's Supervisor slug, or None if it can't be determined.
+
+    NOT the slug in config.yaml: a repository install gets a repo-hash prefix
+    and a local install gets `local_`, so it has to be read at runtime.
+    """
+    data = _supervisor_get("/addons/self/info")
+    return (data or {}).get("slug")
+
+
+def core_version():
+    """Home Assistant Core version as (year, month), or None if unknown."""
+    raw = (_supervisor_get("/info") or {}).get("homeassistant")
+    parts = re.findall(r"\d+", raw or "")
+    if len(parts) >= 2:
+        try:
+            return int(parts[0]), int(parts[1])
+        except ValueError:
+            return None
+    return None
+
+
+def addon_config_url(slug, core):
+    """Internal link to this add-on's configuration page.
+
+    2026.2 renamed Add-ons to Apps and MOVED the UI route with it:
+        < 2026.2   /hassio/addon/<slug>/config
+        >= 2026.2  /config/app/<slug>/config
+    Easy to miss, because the FILESYSTEM path `/addons` did not change -- 1.2.2
+    shipped the old route and landed users on a dead page. When the version
+    can't be read, prefer the modern route: new installs are the common case
+    and the old one is only reachable on Home Assistant that is already EOL.
+    """
+    if core is not None and core < (2026, 2):
+        return f"homeassistant://hassio/addon/{slug}/config"
+    return f"homeassistant://config/app/{slug}/config"
 
 
 def mqtt_credentials():
@@ -312,8 +347,8 @@ def main():
     # connect(): _on_connect announces discovery, which reads shade.DEVICE.
     _slug = addon_slug()
     if _slug:
-        shade.DEVICE["configuration_url"] = (
-            f"homeassistant://hassio/addon/{_slug}/config")
+        shade.DEVICE["configuration_url"] = addon_config_url(_slug,
+                                                             core_version())
 
     client = make_client()
     host, port = connect(client)

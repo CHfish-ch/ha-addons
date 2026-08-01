@@ -59,7 +59,7 @@ so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.2.2. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.2.3. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -249,6 +249,18 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   The slug must come from `/addons/self/info` at runtime — a repository
   install is hash-prefixed and a local one is `local_`, so config.yaml's slug
   is the wrong value. That endpoint needs no `hassio_api` permission.
+  **The UI route moved in 2026.2** with the Apps rename: `/hassio/addon/<slug>
+  /config` became `/config/app/<slug>/config`. 1.2.2 shipped the old one and
+  landed on a dead page; 1.2.3 picks the route from the Core version read via
+  `/info` (also permission-free). The trap is that the *filesystem* path
+  `/addons` did NOT change, so "paths are unchanged" reads as true when the
+  route it actually needs has moved. Same applies to the CLI: `ha addons` is
+  now `ha apps`.
+  **The reverse link (app page → device) is not achievable** and shouldn't be
+  attempted: a device's URL is `/config/devices/device/<registry-uuid>`, the
+  UUID is assigned by Home Assistant and only readable over the WebSocket
+  device registry, which needs `homeassistant_api: true` — full Core API
+  access for every user, to save one click. Documented in the README instead.
   **This prefix bites users too, not just code**: `ha apps info
   swiss_meteo_shade` fails with "doesn't exist", which reads like a broken
   install. The fastest way to read the real slug is the browser address bar on
@@ -315,7 +327,7 @@ config changes came out of the investigation:
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options + 5 forecast + 5 device-link, all passing; no external deps beyond
+- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 7 options + 5 forecast + 9 device-link, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).

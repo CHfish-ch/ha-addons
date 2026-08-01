@@ -15,9 +15,16 @@ sensors you can drive automations from:
 
 > **Names note.** Home Assistant 2026.2 renamed **Add-ons** to **Apps**. This
 > guide says *app*; on older Home Assistant you will see *add-on* in the same
-> places. Filesystem paths such as `/addons` are unchanged, but the **CLI
-> command was renamed too** — it is `ha apps …`, not `ha addons …`, on 2026.2
-> and later. Run `ha apps --help` if a subcommand is not recognised.
+> places. The rename went deeper than the labels:
+>
+> | | before 2026.2 | 2026.2 and later |
+> | --- | --- | --- |
+> | CLI | `ha addons …` | `ha apps …` |
+> | UI route | `/hassio/addon/<slug>/config` | `/config/app/<slug>/config` |
+> | filesystem | `/addons` | `/addons` *(unchanged)* |
+>
+> The unchanged filesystem path is what makes the moved UI route easy to miss.
+> Run `ha apps --help` if a subcommand is not recognised.
 
 > **Finding your app's slug.** Several CLI commands want it, and it is **not**
 > `swiss_meteo_shade` — the Supervisor prefixes it: `local_swiss_meteo_shade`
@@ -234,6 +241,18 @@ Assistant's Supervisor log adds its own timestamps when the add-on log option
 
 Then Settings → Devices & Services → **MQTT** → **1 device** shows *Swiss Meteo
 Shade* with all entities (below).
+
+> **Moving between the app and its device.** They are one thing shown in two
+> places, so the device page carries a **Visit** / configuration link straight
+> back to this app's Configuration tab.
+>
+> The reverse direction — app page → device — is **not** available as a link,
+> and that asymmetry is structural rather than an oversight. The app can look
+> up its own slug from the Supervisor, so it can build a link *to* itself; but
+> a device's address is a registry ID that only Home Assistant assigns
+> (`/config/devices/device/<uuid>`), and reading it would need full Core API
+> access for every user of this app — a permission not worth spending on a
+> hyperlink. Go via Settings → Devices & Services → **MQTT** instead.
 
 ---
 

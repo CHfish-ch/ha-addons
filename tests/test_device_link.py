@@ -30,8 +30,13 @@ class FakeClient:
         return True
 
 
+_REAL_SUPERVISOR_GET = run._supervisor_get
+
+
 def setup_function():
     shade.DEVICE.pop("configuration_url", None)
+    run._supervisor_get = _REAL_SUPERVISOR_GET
+    run.requests = requests
 
 
 def _devices_announced():
@@ -76,6 +81,36 @@ def test_supervisor_failure_is_not_fatal():
         assert run.addon_slug() is None      # returns None, does not raise
     finally:
         run.requests = requests
+
+
+def test_route_matches_the_2026_2_apps_rename():
+    """1.2.2 shipped the pre-rename route and landed users on a dead page.
+
+    The FILESYSTEM path /addons did not change in 2026.2, but the UI route
+    did, which is exactly why this was easy to get wrong.
+    """
+    slug = "e9276670_swiss_meteo_shade"
+    modern = run.addon_config_url(slug, (2026, 2))
+    assert modern == f"homeassistant://config/app/{slug}/config", modern
+    assert "/hassio/addon/" not in modern
+
+
+def test_route_stays_old_on_pre_rename_home_assistant():
+    slug = "e9276670_swiss_meteo_shade"
+    legacy = run.addon_config_url(slug, (2025, 12))
+    assert legacy == f"homeassistant://hassio/addon/{slug}/config", legacy
+
+
+def test_unknown_version_prefers_the_modern_route():
+    """Unreadable version -> assume current; the old route is EOL-only."""
+    assert "/config/app/" in run.addon_config_url("s", None)
+
+
+def test_core_version_parses_real_version_strings():
+    for raw, want in (("2026.2.1", (2026, 2)), ("2026.12.0", (2026, 12)),
+                      ("2025.7.0b3", (2025, 7)), ("", None), (None, None)):
+        run._supervisor_get = lambda p, _r=raw: {"homeassistant": _r}
+        assert run.core_version() == want, f"{raw!r} -> {run.core_version()}"
 
 
 def test_discovery_carries_the_url_when_known():
