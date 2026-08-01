@@ -295,7 +295,12 @@ config changes came out of the investigation:
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
 - `CHANGELOG.md` exists and is shown in the Supervisor's Changelog tab. Add an
-  entry in the same commit as every version bump.
+  entry in the same commit as every version bump, grouped under **Added /
+  Changed / Fixed / Notes** — a reader needs to tell a bug fix from a feature
+  at a glance, and "Notes" covers things they must act on that are not code
+  changes (the automation triggers in 1.1.0, for instance). Anything that can
+  alter how the covers move gets said outright. Accumulate entries under
+  `## Unreleased` between releases and rename that heading on the bump.
 - **Bumping the version touches exactly three files**: `version.py` `VERSION`
   (the single source for all Python — the MQTT `sw_version` in HA's device
   info and the outbound `USER_AGENT` both derive from it), `config.yaml`
