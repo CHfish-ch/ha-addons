@@ -83,9 +83,13 @@ def test_dockerfile_copies_every_module():
     time, not at build time -- so the two lists must agree."""
     root = os.path.normpath(os.path.join(
         os.path.dirname(os.path.abspath(__file__)), "..", "swiss_meteo_shade"))
+    # Join backslash continuations first: a wrapped COPY line would otherwise
+    # be invisible to a startswith("COPY") scan, and a module hidden on the
+    # second line is exactly what this test exists to catch.
     with open(os.path.join(root, "Dockerfile")) as fh:
-        copied = {tok for line in fh if line.startswith("COPY")
-                  for tok in line.split() if tok.endswith(".py")}
+        text = fh.read().replace("\\\n", " ")
+    copied = {tok for line in text.splitlines() if line.startswith("COPY")
+              for tok in line.split() if tok.endswith(".py")}
     on_disk = {f for f in os.listdir(root) if f.endswith(".py")}
     assert on_disk == copied, (
         f"Dockerfile COPY and the add-on directory disagree: "
