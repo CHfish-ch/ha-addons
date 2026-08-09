@@ -20,6 +20,8 @@ correct.
 │   ├── radar.py             RZC composite → rain nowcast
 │   ├── events.py            error/warning recorder
 │   ├── version.py           VERSION + USER_AGENT; dependency-free on purpose
+│   ├── irradiance.py        plane-of-array physics; pure, no astronomy/clock
+│   ├── solar.py             the ONLY module importing astral
 │   ├── translations/en.yaml option names + descriptions for the config screen
 │   ├── README.md            shown on the install page
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
@@ -53,7 +55,10 @@ via pytest. Only `rain_forensics.py` among the tools imports app code; the
 
 The test files import only what they need — `logic.py`, `forecast.py` and
 `events.py` pull in neither numpy nor h5py, and `radar.py` guards both imports,
-so no module stubbing is required anywhere. `test_radar.py` needs real numpy.
+so no module stubbing is required anywhere. `test_radar.py` needs real numpy,
+and `test_solar.py` needs `astral` (`sudo apt install python3-astral`, or pip).
+`irradiance.py` deliberately takes elevations as arguments and imports neither,
+so the 18 acceptance cases run with a bare interpreter.
 
 ## What it is
 

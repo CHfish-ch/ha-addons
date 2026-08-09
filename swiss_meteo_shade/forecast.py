@@ -29,6 +29,8 @@ from datetime import datetime, timezone, timedelta
 import requests
 
 import events
+import irradiance
+import solar
 from version import USER_AGENT
 
 APP = "https://app-prod-ws.meteoswiss-app.ch"
@@ -44,6 +46,11 @@ MISSING_APP = 32767          # MaxInt16 sentinel used by the app endpoint
 LOOKAHEAD_H = 1
 
 OPENMETEO_MODES = ("always", "fallback_only", "never")
+
+# Radiation parameters, verified present as assets in the same items
+# already fetched for gust/sunshine/temperature.
+GHI_PARAM = "gre000h0"   # global radiation, hourly mean, W/m2
+DHI_PARAM = "ods000h0"   # diffuse radiation, hourly mean, W/m2
 
 
 def _session():
@@ -405,6 +412,46 @@ def _fetch_forecast_param(session, point_id, param, lookahead_h, assets,
     return _window_from_rows(rows, lookahead_h, back_hours)
 
 
+def hourly_series(session, point_id, param, assets):
+    """[(datetime UTC, value)] for one parameter, or None.
+
+    Same download and conditional-GET cache as _fetch_forecast_param -- this
+    just keeps the timestamps instead of collapsing to a window of values.
+    Irradiance needs them: the sub-step elevations have to be computed for the
+    specific hour each GHI/DHI value belongs to, and a bare list of numbers
+    cannot say which hour that is.
+
+    Timestamps are the END of the hour the value covers (see solar.substep_
+    times); parsing is UTC throughout, never local.
+    """
+    # Fetching with lookahead 0 is enough to populate the cache; the rows we
+    # want are the full series, read back from it below.
+    _fetch_forecast_param(session, point_id, param, 0, assets)
+    href = next((a["href"] for n, a in assets.items()
+                 if f".{param}." in n and n.endswith(".csv")), None)
+    if not href:
+        return None
+    rows = _file_series.get((href, str(point_id)))
+    if not rows:
+        return None
+
+    out = []
+    for date_str, val_str in rows:
+        # Rows are stored exactly as parsed from the CSV, i.e. strings. Coerce
+        # here the same way _window_from_rows does, including the NaN guard --
+        # a NaN reaching json.dumps produces invalid JSON on the MQTT topic.
+        try:
+            when = datetime.strptime(str(date_str)[:10], "%Y%m%d%H").replace(
+                tzinfo=timezone.utc)
+            value = float(val_str)
+        except (ValueError, IndexError, TypeError):
+            continue
+        if math.isnan(value):
+            continue
+        out.append((when, value))
+    return out or None
+
+
 def from_official(lv95_e, lv95_n, session=None, lookahead_h=LOOKAHEAD_H,
                   need_temp=False):
     """Return {'gust_kmh':float, 'sunshine':bool} from official OGD, or None.
@@ -489,6 +536,65 @@ def from_openmeteo(lat, lon, session=None, lookahead_h=LOOKAHEAD_H):
 # ---------------------------------------------------------------------------
 # Orchestration: combine sources into the signals the awning logic needs
 # ---------------------------------------------------------------------------
+def irradiance_now(lv95_e, lv95_n, lat, lon, session=None, tilts=(90, 45),
+                   albedo=0.20, min_elevation=3.0, substeps=12,
+                   height_m=0.0, now=None):
+    """Plane-of-array irradiance right now, per tilt, or None.
+
+    Only the OFFICIAL source carries radiation: the app feed has no GHI/DHI
+    equivalent, so there is deliberately no fallback here. When this returns
+    None the caller must treat the sun signal as unknown rather than as dark --
+    the same rule the sunshine model already follows.
+
+    Returns {"ghi", "dhi", "dni_hour", "hour_sine", "elevation", "azimuth",
+             "hour_end", tilt: {...}, ...}
+    """
+    s = session or _session()
+    now = now or datetime.now(timezone.utc)
+    try:
+        point = _find_forecast_point(s, lv95_e, lv95_n)
+        if not point:
+            return None
+        assets = _newest_item_with(s, (GHI_PARAM, DHI_PARAM))
+        if not assets:
+            events.warn("no forecast item carries both radiation parameters "
+                        f"({GHI_PARAM}, {DHI_PARAM}) -> irradiance unavailable")
+            return None
+        ghi_rows = hourly_series(s, point, GHI_PARAM, assets)
+        dhi_rows = hourly_series(s, point, DHI_PARAM, assets)
+    except (requests.RequestException, ValueError):
+        return None
+    if not ghi_rows or not dhi_rows:
+        return None
+
+    # The value covering `now` is the one stamped at the NEXT full hour: a
+    # record stamped 15:00 describes 14:00-15:00 (spec 2.3).
+    hour_end = (now.replace(minute=0, second=0, microsecond=0)
+                + timedelta(hours=1))
+    ghi = next((v for t, v in ghi_rows if t == hour_end), None)
+    dhi = next((v for t, v in dhi_rows if t == hour_end), None)
+    if ghi is None or dhi is None:
+        events.warn(f"radiation forecast has no row for {hour_end:%Y-%m-%d %H}"
+                    f"Z -> irradiance unavailable this cycle")
+        return None
+
+    obs = solar.observer(lat, lon, height_m)
+    result = irradiance.evaluate_hour(
+        ghi=ghi, dhi=dhi,
+        substep_elevations=solar.substep_elevations(obs, hour_end, substeps),
+        now_elevation=solar.elevation_at(obs, now),
+        tilts=tilts, albedo=albedo, min_elevation=min_elevation,
+        day_of_year=now.timetuple().tm_yday)
+    result.update({
+        "ghi": ghi, "dhi": dhi,
+        "elevation": solar.elevation_at(obs, now),
+        "azimuth": solar.azimuth_at(obs, now),
+        "hour_end": hour_end.isoformat(),
+        "diffuse_fraction": (dhi / ghi) if ghi else None,
+    })
+    return result
+
+
 def gather(plz, lv95_e, lv95_n, lat, lon, openmeteo_mode="always",
            prefer_app=False, lookahead_h=LOOKAHEAD_H, session=None,
            need_temp=False):

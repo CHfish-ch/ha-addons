@@ -154,6 +154,30 @@ def poa(dni, ghi, dhi, elevation_deg, tilt_deg, albedo=0.20,
             "total": direct + diffuse + ground, "cos_incidence": ct}
 
 
+def evaluate_hour(ghi, dhi, substep_elevations, now_elevation, tilts,
+                  albedo=0.20, min_elevation=3.0, day_of_year=None):
+    """One forecast hour -> POA per tilt, at the instant `now_elevation`.
+
+    `substep_elevations` are the sub-sampled elevations across the hour, used
+    ONLY to reconstruct DNI_hour; `now_elevation` is the moment being
+    published. Keeping them separate is the whole point -- see the module
+    docstring and test case G.
+
+    Elevations arrive as plain numbers, so this stays free of astronomy and of
+    the clock; `solar.py` supplies them in production and the tests supply
+    literals.
+
+    Returns {"dni_hour": float, "hour_sine": float, tilt: {...}, ...}.
+    """
+    s = hour_mean_sine(substep_elevations)
+    dni = dni_from_hour(ghi, dhi, s, day_of_year)
+    out = {"dni_hour": dni, "hour_sine": s}
+    for tilt in tilts:
+        out[tilt] = poa(dni, ghi, dhi, now_elevation, tilt, albedo,
+                        min_elevation)
+    return out
+
+
 def hourly_mean_poa(dni, ghi, dhi, elevations_deg, tilt_deg, albedo=0.20,
                     min_elevation=3.0):
     """True hourly mean POA across the hour's sub-steps (spec 3.5).
