@@ -64,6 +64,58 @@ def test_implausible_speed_still_rejected():
     assert speed <= radar.MAX_MOTION_KMH
 
 
+def test_saturated_pair_is_rejected_before_averaging():
+    """Regression for the 2026-08-09 false positive.
+
+    Frames 16:25-16:35 produced pair estimates of -10.00 and +1.00 cells/5min.
+    -10.00 is exactly MAX_MOTION_KMH (120 km/h = 10 cells), the signature of a
+    wrapped FFT shift rather than a measurement, and the old `> max_cells`
+    check let it through on the boundary. Averaged with the sane +1.00 it
+    became -4.50, projecting the sample ~20 km south onto a storm that was
+    never approaching -- rain reported on a cell with zero echo for 25 minutes.
+    """
+    # the counter is reset per evaluate(), not per estimate_motion, so a
+    # test calling the latter directly must clear it itself
+    radar._MOTION_DIAG.update({"spread_cells": None, "rejected_pairs": 0})
+    cap = radar.MAX_MOTION_KMH / 12.0
+    saturated, sane = (-cap, 1.0), (1.0, 0.0)
+    seen = iter([saturated, sane])
+
+    real_pc, real_echo = radar.phase_correlate, radar._has_echo
+    radar.phase_correlate = lambda a, b: next(seen)
+    radar._has_echo = lambda w: True
+    try:
+        frames = [np.zeros((8, 8)) for _ in range(3)]
+        drow, dcol = radar.estimate_motion(frames, 4, 4)
+    finally:
+        radar.phase_correlate, radar._has_echo = real_pc, real_echo
+
+    assert drow == 1.0, (
+        f"saturated pair must be discarded, not averaged: got drow={drow} "
+        f"(the old behaviour gave {(-cap + 1.0) / 2})")
+    assert radar._MOTION_DIAG["rejected_pairs"] == 1
+
+
+def test_motion_spread_is_recorded_for_coherent_and_incoherent_fields():
+    """Diagnostic only -- it must be measured, not acted on."""
+    real_pc, real_echo = radar.phase_correlate, radar._has_echo
+    radar._has_echo = lambda w: True
+    try:
+        pair = iter([(1.0, 0.0), (1.0, 0.0)])
+        radar.phase_correlate = lambda a, b: next(pair)
+        frames = [np.zeros((8, 8)) for _ in range(3)]
+        radar.estimate_motion(frames, 4, 4)
+        assert radar._MOTION_DIAG["spread_cells"] == 0.0
+
+        pair = iter([(1.0, 0.0), (7.0, 0.0)])
+        radar.phase_correlate = lambda a, b: next(pair)
+        drow, _ = radar.estimate_motion(frames, 4, 4)
+        assert radar._MOTION_DIAG["spread_cells"] == 6.0
+        assert drow == 4.0, "spread is recorded but must not change the result"
+    finally:
+        radar.phase_correlate, radar._has_echo = real_pc, real_echo
+
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

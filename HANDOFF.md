@@ -347,6 +347,45 @@ nearby means nothing can arrive within the lead time. Locked by `test_radar.py`.
 **Do not "fix" this by raising `radar_threshold_mmh`.** The threshold was never
 the problem and 0.1 is correct.
 
+### The 2026-08-09 recurrence (same symptom, different cause)
+
+Rain reported for one cycle on a cell with **zero echo within 5 km across every
+frame**. The 07-28 guard was working and was not at fault -- the correlation
+window held a real storm (hundreds of wet cells, peaks 43-118 mm/h), just none
+of it near home, so `_has_echo` passed correctly.
+
+The cause was **one saturated pair being averaged in**. Per-pair estimates from
+`rain_forensics.py`:
+
+    16:25->16:30   drow = -10.00     <- exactly MAX_MOTION_KMH (120 km/h)
+    16:30->16:35   drow =  +1.00
+                   mean = -4.50      <- the vector that did the damage
+
+`MAX_MOTION_KMH / 12 == 10.0` and the check was `> max_cells`, so a value
+landing precisely ON the cap survived the boundary, then dragged the mean to
+-4.50. That projected the sample ~20 km south onto the storm the wide scan
+found at +16 rows. Fix: reject a saturated pair BEFORE averaging, not just cap
+the mean. Locked by `test_saturated_pair_is_rejected_before_averaging`, which
+reproduces the -4.5 exactly.
+
+**Investigated and deliberately NOT changed** (evidence in the same session):
+- *Shrinking `MOTION_WINDOW_KM`.* Note it is `size // 2`, so 128 means +/-64 km,
+  NOT +/-128. That is not arbitrary: max lead is 10 min + 4 anchor steps = 30
+  min, and at the 120 km/h cap a system covers 60 km -- the window already
+  matches the furthest cell the code samples. Shrinking it alone would leave us
+  sampling cells we never tracked; it only makes sense together with
+  MAX_MOTION_KMH / MAX_ANCHOR_STEPS.
+- *Requiring per-pair agreement.* Measured on the same event, 3 of 4 triplets
+  would have been rejected -> persistence, during active convection. Cost is
+  losing lead time, not detection. `motion_spread_cells` is now recorded in the
+  radar result so this can be decided from data later.
+- *Border effects.* A non-issue for the window: the grid is 710x640 km and
+  every Swiss extreme tested (Geneva, Chiasso, Scuol, Schaffhausen) is >=147 km
+  from the nearest grid edge, so the +/-64 km window is always full, and
+  `_window` clips with max/min anyway. 0 NaN cells observed. The real border
+  caveat is radar QUALITY -- higher, more blocked beams far from the Swiss
+  sites -- which no code change here can address.
+
 ## The 2026-07-30 incident (Open-Meteo gust spike)
 
 User reported `Gust (Open-Meteo ICON)` reading 72.7 km/h, stuck for 80 minutes,

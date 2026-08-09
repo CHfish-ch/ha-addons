@@ -33,6 +33,17 @@ alter how your covers move is called out explicitly.
   `Global radiation`, `Diffuse fraction` and `Sun model` as diagnostics. All
   read Unknown under the `sunshine` model, since nothing is being computed.
 
+### Fixed
+
+- **A spurious "Rain within 10 min" on a completely dry cell.** Field motion is
+  estimated by correlating consecutive radar frames, and the per-pair results
+  were averaged without checking each one. A pair that saturated at exactly the
+  120 km/h speed limit slipped past a `>` comparison on the boundary and
+  dragged the average into a fabricated northward vector, which sampled a storm
+  ~20 km away that was never approaching. Saturated pairs are now discarded
+  before averaging. Observed 2026-08-09; the radar archive was replayed with
+  `tools/rain_forensics.py` and the regression test reproduces the exact value.
+
 ### Notes
 
 - Switching model changes **which thresholds are read**; the other set is

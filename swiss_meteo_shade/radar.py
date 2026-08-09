@@ -65,6 +65,13 @@ NOW_TOLERANCE_KM = 0
 # estimate_motion. 3 cells is deliberately low: enough to reject a blank sky
 # without discarding a small genuine shower.
 MOTION_MIN_ECHO_CELLS = 3
+
+# Diagnostics for the motion estimate, reset each evaluate(). Recorded rather
+# than acted on: `spread_cells` says how far the per-pair estimates disagreed
+# (a coherent field should be near zero), `rejected_pairs` counts saturated
+# pairs discarded before averaging. Collected so the question "how often is
+# the vector incoherent?" can be answered from real data rather than guessed.
+_MOTION_DIAG = {"spread_cells": None, "rejected_pairs": 0}
 MAX_MOTION_KMH = 120         # discard motion vectors implying faster than this
 MOTION_WINDOW_KM = 128        # size of the box used to estimate field motion
 MAX_DATA_AGE_MIN = 20         # older than this -> sensors go "unavailable"
@@ -428,6 +435,7 @@ def estimate_motion(frames, row, col):
     With no echo to track there is also nothing that could arrive within the
     lead time, so zero motion (pure persistence) is both safer and more
     physically honest than a fabricated vector."""
+    max_cells = MAX_MOTION_KMH / 12.0
     est = []
     for prev, cur in zip(frames, frames[1:]):
         w_prev = _window(prev, row, col, MOTION_WINDOW_KM)
@@ -435,15 +443,35 @@ def estimate_motion(frames, row, col):
         # only correlate when there is something to correlate
         if not (_has_echo(w_prev) and _has_echo(w_cur)):
             continue
-        est.append(phase_correlate(w_prev, w_cur))
+        d = phase_correlate(w_prev, w_cur)
+        # Reject a saturated PAIR before it can be averaged in. Capping only
+        # the mean is not enough: on 2026-08-09 one pair returned exactly
+        # -10.00 cells/5min -- precisely MAX_MOTION_KMH, the signature of an
+        # FFT shift that wrapped rather than a measurement -- and `> max_cells`
+        # let it through on the boundary. Averaged with a sane +1.00 it became
+        # -4.50, which projected the sample point ~20 km south onto a storm
+        # that was never approaching, and reported rain on a dry cell.
+        if (d[0] * d[0] + d[1] * d[1]) ** 0.5 >= max_cells:
+            _MOTION_DIAG["rejected_pairs"] += 1
+            continue
+        est.append(d)
     if not est:
         return 0.0, 0.0
     drow = float(np.mean([e[0] for e in est]))
     dcol = float(np.mean([e[1] for e in est]))
+    # How far the surviving pairs disagree, in cells/5min. Purely diagnostic:
+    # it is recorded, not acted on, so we can see how common incoherence is
+    # before deciding whether to distrust the mean outright.
+    if len(est) > 1:
+        spread = max(
+            ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
+            for i, a in enumerate(est) for b in est[i + 1:])
+        _MOTION_DIAG["spread_cells"] = round(float(spread), 2)
+    else:
+        _MOTION_DIAG["spread_cells"] = 0.0
     # Discard implausibly fast motion (corrupt FFT shift): 1 cell/5min = 12 km/h.
     # Beyond MAX_MOTION_KMH we cannot trust the vector, so fall back to zero
     # motion (persistence) rather than sampling a wildly wrong future cell.
-    max_cells = MAX_MOTION_KMH / 12.0
     if (drow * drow + dcol * dcol) ** 0.5 > max_cells:
         return 0.0, 0.0
     return drow, dcol
@@ -461,6 +489,7 @@ def sample(field, row, col, tolerance_km):
 
 
 def evaluate(session=None):
+    _MOTION_DIAG.update({"spread_cells": None, "rejected_pairs": 0})
     own = session is None
     if own:
         session = requests.Session()
@@ -506,6 +535,8 @@ def evaluate(session=None):
         "motion_km_per_5min": [round(-drow, 1), round(dcol, 1)],  # north+, east+
         "speed_kmh": round(float(np.hypot(drow, dcol)) * 12, 1),
         "threshold_mmh": THRESHOLD_MMH,
+        "motion_spread_cells": _MOTION_DIAG["spread_cells"],
+        "motion_rejected_pairs": _MOTION_DIAG["rejected_pairs"],
     }
 
     anchor = 0
