@@ -11,7 +11,7 @@ correct.
 <repo root>/                  = https://github.com/CHfish-ch/ha-addons (public)
 ├── repository.yaml          name/url/maintainer shown in the Add-on Store
 ├── swiss_meteo_shade/       THE ADD-ON — one top-level folder per add-on in this repo
-│   ├── config.yaml          manifest, 17 options
+│   ├── config.yaml          manifest, 24 options
 │   ├── Dockerfile           COPY paths are relative to this dir; no change needed
 │   ├── run.py               entrypoint
 │   ├── shade.py             orchestrator + MQTT discovery
@@ -27,7 +27,8 @@ correct.
 │   └── DOCS.md              symlink → README.md; shown in the Documentation tab
 ├── tests/                   conftest + test_logic, test_events, test_events_entity,
 │                            test_radar, test_imports, test_options, test_forecast,
-│                            test_device_link
+│                            test_device_link, test_irradiance, test_solar,
+│                            test_sun_model
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -64,7 +65,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.3.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.4.0. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -99,8 +100,8 @@ there are conditions where neither fires (intended).
   SIGTERM/SIGINT, watchdog exit after repeated failures, hysteresis persistence
   to `/data`.
 - `shade.py` — calls radar + forecast, applies the three sun thresholds, builds
-  the state dict, publishes MQTT discovery for 22 entities (20 sensors +
-  2 `event` entities).
+  the state dict, publishes MQTT discovery for 27 entities (17 sensors,
+  8 binary, 2 `event`).
 - `forecast.py` — gust/sun/temp from official OGD + app fallback + Open-Meteo,
   plus the conditional-GET cache.
 - `logic.py` — pure decision function, no I/O, fully unit-testable.
@@ -288,6 +289,21 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   config. From 1.3.0 on, normal deprecation applies again.
   User-facing docs (README/DOCS) should describe the add-on **as it is now**,
   never as a diff against an earlier version. Past defects belong here.
+- **`sun_model` picks the sun signal; the two models never blend.** `sunshine`
+  (minutes/hour) is the default and unchanged; `irradiance` computes W/m2 on
+  the surface from `gre000h0`/`ods000h0`. Only the selected model's thresholds
+  are read. Radiation is fetched ONLY under the irradiance model -- it is
+  another ~60 MB of files. A failed radiation fetch yields sun=None (unknown),
+  never a silent fall back to sunshine: the entities have to stay explainable,
+  and `test_sun_model.py` asserts the sunshine value cannot leak through.
+  Tilt mapping is physical, not configurable: awning 45 deg, both blinds
+  vertical.
+  **The irradiance figure is an UPPER BOUND** -- the surface is assumed to face
+  the sun, so azimuth cancels out of the geometry. That is what keeps one
+  number valid for every window; which window the sun is on stays an
+  automation question (see the sun-position guide). Do not add a configurable
+  surface azimuth without redoing the spec's acceptance cases, which all
+  assume tracking.
 - **Window orientation is deliberately NOT an add-on option.** The decision is
   "is it sunny and safe", which is identical for every window on the building;
   whether the sun is on a *particular* facade is per-cover, and users routinely
@@ -358,10 +374,10 @@ config changes came out of the investigation:
 
 ## Current state
 
-- 22 MQTT entities. Operational: recommendation, the three shade decisions, and
+- 27 MQTT entities. Operational: recommendation, the three shade decisions, and
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
-- 17 config options, all documented in `README.md` **and** `translations/en.yaml`.
+- 24 config options, all documented in `README.md` **and** `translations/en.yaml`.
 - Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 4 options + 5 forecast + 9 device-link, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab

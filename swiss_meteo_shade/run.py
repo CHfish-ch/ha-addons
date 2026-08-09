@@ -137,6 +137,20 @@ def apply_options(opts):
     shade.RADAR_FAIL_SAFE = bool(g("radar_fail_safe", False))
     forecast.FORECAST_MAX_CACHE_MINUTES = _num(g("forecast_max_cache_minutes"),
                                                60, int, "forecast_max_cache_minutes")
+    shade.SUN_MODEL = _choice(g("sun_model"), "sunshine", shade.SUN_MODELS,
+                              "sun_model")
+    shade.IRRADIANCE_MIN_AWNING = _num(g("irradiance_min_awning"), 250, int,
+                                       "irradiance_min_awning")
+    shade.IRRADIANCE_MIN_BACKUP = _num(g("irradiance_min_backup"), 250, int,
+                                       "irradiance_min_backup")
+    shade.IRRADIANCE_MIN_INDEPENDENT = _num(g("irradiance_min_independent"),
+                                            250, int,
+                                            "irradiance_min_independent")
+    shade.ALBEDO = _num(g("albedo"), 0.20, float, "albedo")
+    shade.MIN_SOLAR_ELEVATION = _num(g("min_solar_elevation"), 3.0, float,
+                                     "min_solar_elevation")
+    shade.IRRADIANCE_SUBSTEPS = _num(g("irradiance_substeps"), 12, int,
+                                     "irradiance_substeps")
     shade.SUN_MIN_AWNING = _num(g("sun_min_awning"), 20, int, "sun_min_awning")
     shade.SUN_MIN_BACKUP = _num(g("sun_min_backup"), 20, int, "sun_min_backup")
     shade.SUN_MIN_INDEPENDENT = _num(g("sun_min_independent"), 20, int,

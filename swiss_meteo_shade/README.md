@@ -94,6 +94,51 @@ override. It is part of the published state JSON but has no entity of its own �
 `Shade recommendation` already distinguishes all three outcomes, and `Wind high`
 and `Rain within 10 min` show why.
 
+### Two ways to judge "sunny enough" — `sun_model`
+
+**`sunshine` (default).** Uses the forecast **minutes of sunshine per hour**,
+compared against `sun_min_awning` / `_backup` / `_independent`. Simple and
+robust, but blind to intensity: a hazy hour and a blazing one both count as
+60 min/h, and it says nothing about how much of that sun actually lands on a
+vertical blind versus a sloped awning.
+
+**`irradiance`.** Computes the solar power arriving on the surface in **W/m²**,
+from the MeteoSwiss global and diffuse radiation forecast, and compares it
+against `irradiance_min_awning` / `_backup` / `_independent`. It captures three
+things the minutes model cannot:
+
+- **Intensity.** Overcast is roughly 100–200 W/m², hazy sun 300–500, full clear
+  sun 700–1000.
+- **Diffuse light.** On a heavily overcast day a vertical blind still receives
+  real heat, and half of what it sees is sky.
+- **Geometry.** A low winter sun strikes a *vertical* blind almost head-on
+  while barely grazing a 45° awning; a high summer sun does the opposite. The
+  crossover is at 22.5° of solar elevation — below it the blind collects more,
+  above it the awning does. The two `Irradiance` sensors show this directly.
+
+Each output is judged on the plane it physically is: the awning on a 45°
+surface, both blind outputs on a vertical one.
+
+> **What the number means.** The surface is assumed to always face the sun, so
+> the figure is an **upper bound** — a real facade with a fixed orientation
+> receives this much only while the sun is roughly square-on to it, and less
+> otherwise. That is deliberate: it keeps one number valid for every window on
+> the building, and *which* window the sun is actually on stays a question for
+> your automation (see [Step 7](#step-7--automations)). The practical
+> consequence is that the reading overstates most near the edges of a facade's
+> azimuth range, which is a reason to narrow that range rather than widen it.
+
+Switching model changes **which thresholds are read** — the other set is
+ignored, not combined. The `Sun model` diagnostic sensor reports which one is
+live. Radiation is only fetched when the irradiance model is selected, so the
+default costs nothing extra.
+
+If the radiation forecast is unavailable, the sun signal becomes **unknown**
+(`Forecast data` → *Problem*, shade kept in) rather than silently reverting to
+the sunshine model — a quiet model switch would make the entities impossible
+to interpret. Note that only the official source carries radiation; the app
+feed has no equivalent, so there is no fallback for this model.
+
 **Design choice — forecast-only, no live wind sensor.** An earlier design used a
 measured gust from the nearest weather station, but that data arrives with a
 ~10-minute lag from a station kilometres away — too late and too displaced to
@@ -210,9 +255,16 @@ Open the app's **Configuration** tab:
 | `openmeteo_mode` | when to use the Open-Meteo ICON gust source: `always` / `fallback_only` / `never` | `always` |
 | `prefer_app_forecast` | try the app feed before the official one | `false` |
 | `lookahead_hours` | how many hours ahead to look | `1` |
-| `sun_min_awning` | minutes of sun per hour before the **awning** extends | `20` |
-| `sun_min_backup` | minutes of sun per hour before the **backup blind** closes | `20` |
-| `sun_min_independent` | minutes of sun per hour before the **independent blinds** close | `20` |
+| `sun_model` | how "sunny enough" is judged: `sunshine` or `irradiance` | `sunshine` |
+| `sun_min_awning` | *(sunshine model)* minutes of sun per hour before the **awning** extends | `20` |
+| `sun_min_backup` | *(sunshine model)* minutes of sun per hour before the **backup blind** closes | `20` |
+| `sun_min_independent` | *(sunshine model)* minutes of sun per hour before the **independent blinds** close | `20` |
+| `irradiance_min_awning` | *(irradiance model)* W/m² on a 45° plane before the **awning** extends | `250` |
+| `irradiance_min_backup` | *(irradiance model)* W/m² on a vertical plane before the **backup blind** closes | `250` |
+| `irradiance_min_independent` | *(irradiance model)* W/m² on a vertical plane before the **independent blinds** close | `250` |
+| `albedo` | *(irradiance model)* ground reflectance, 0–0.9 | `0.20` |
+| `min_solar_elevation` | *(irradiance model)* ignore the direct beam below this sun height (°) | `3.0` |
+| `irradiance_substeps` | *(irradiance model)* sun-path samples per hour | `12` |
 | `radar_threshold_mmh` | rain rate that counts as rain | `0.1` |
 | `radar_tolerance_km` | tolerance around your cell for forecast steps | `1` |
 | `radar_fail_safe` | if the radar is unreachable, treat as rain (retract) instead of assuming dry | `false` |
@@ -273,6 +325,17 @@ gust source answered** (all failed), in which case the awning is kept in as a
 precaution regardless of sun, or the sunshine forecast is missing (treated as
 not sunny). A present-but-low gust is trusted normally and does **not** trigger
 this.)
+
+**Irradiance model sensors** (all read Unknown under the `sunshine` model,
+since nothing is being computed): `irradiance_awning` (W/m² on the 45° plane)
+and `irradiance_wall` (W/m² on the vertical plane) are the weather inputs the
+decision uses; `ghi` (global radiation as forecast) and `diffuse_fraction`
+(what share of it is diffuse — high means overcast) are diagnostics showing
+where those came from. `sun_model` reports which model is live.
+
+Solar elevation and azimuth are deliberately **not** published: Home
+Assistant's built-in `sun.sun` already provides both, and duplicating them
+would add entities that disagree with it after a restart.
 
 **Values (sensors):** `shade_recommendation` (**the enum: `extend` / `backup` /
 `none` — trigger automations on this**), `forecast_gust` (km/h),

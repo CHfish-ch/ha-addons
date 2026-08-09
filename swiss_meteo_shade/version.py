@@ -15,7 +15,7 @@ Assistant's device info, and the User-Agent sent to MeteoSwiss/Open-Meteo --
 derives from here, so a bump reaches them automatically.
 """
 
-VERSION = "1.3.0"
+VERSION = "1.4.0"
 
 # Sent on every outbound request so the data providers can identify the client.
 USER_AGENT = f"swiss-meteo-shade/{VERSION} (Home Assistant add-on)"

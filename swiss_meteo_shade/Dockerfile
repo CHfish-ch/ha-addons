@@ -9,7 +9,7 @@ RUN pip install --no-cache-dir \
 COPY radar.py forecast.py logic.py shade.py events.py run.py version.py \
      irradiance.py solar.py /app/
 
-LABEL io.hass.version="1.3.0" \
+LABEL io.hass.version="1.4.0" \
       io.hass.type="addon" \
       io.hass.arch="aarch64|amd64"
 

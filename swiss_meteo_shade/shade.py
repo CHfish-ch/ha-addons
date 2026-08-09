@@ -43,9 +43,22 @@ LOOKAHEAD_H = 1
 RADAR_THRESHOLD_MMH = 0.1
 RADAR_TOLERANCE_KM = 1
 RADAR_FAIL_SAFE = False               # radar outage -> treat as rain (retract)?
+SUN_MODELS = ("sunshine", "irradiance")
+SUN_MODEL = "sunshine"                # how "sunny enough" is judged
 SUN_MIN_AWNING = 20                   # per-output sunshine thresholds (min/h)
 SUN_MIN_BACKUP = 20
 SUN_MIN_INDEPENDENT = 20
+# Irradiance model. Thresholds are W/m2 on the surface; the awning is judged
+# on a 45 deg plane and both blinds on a vertical one, since that is what they
+# physically are. Only one set of thresholds is ever consulted -- see SUN_MODEL.
+IRRADIANCE_MIN_AWNING = 250
+IRRADIANCE_MIN_BACKUP = 250
+IRRADIANCE_MIN_INDEPENDENT = 250
+TILT_AWNING = 45
+TILT_BLIND = 90
+ALBEDO = 0.20
+MIN_SOLAR_ELEVATION = 3.0
+IRRADIANCE_SUBSTEPS = 12
 INTERVAL_SECONDS = 300                 # used to size expire_after
 
 MQTT_BASE = "swiss_meteo_shade"
@@ -95,6 +108,21 @@ def _sun_at(fc, threshold):
     if mins is None:
         return None
     return mins >= threshold
+
+
+def _sun_from_irradiance(irr, tilt, threshold):
+    """Per-output sun flag from plane-of-array irradiance.
+
+    Returns None when radiation is unavailable, exactly as _sun_at does for a
+    missing sunshine forecast: unknown must never read as "not sunny", or a
+    failed fetch would silently look like a cloudy day.
+    """
+    if not irr:
+        return None
+    poa = irr.get(tilt)
+    if not poa or poa.get("total") is None:
+        return None
+    return poa["total"] >= threshold
 
 
 def _events_state():
@@ -150,6 +178,25 @@ def evaluate(session=None, prev_wind_high=False):
                          prefer_app=PREFER_APP, lookahead_h=LOOKAHEAD_H,
                          session=session, need_temp=MIN_TEMP_C is not None)
 
+    # 2b. irradiance, only when that model is selected -- it is another ~60 MB
+    # of radiation files, so it is never fetched for the sunshine model.
+    irr = None
+    if SUN_MODEL == "irradiance":
+        try:
+            irr = forecast.irradiance_now(
+                e, n, lat, lon, session=session,
+                tilts=(TILT_BLIND, TILT_AWNING), albedo=ALBEDO,
+                min_elevation=MIN_SOLAR_ELEVATION,
+                substeps=IRRADIANCE_SUBSTEPS)
+        except Exception as exc:
+            events.warn(f"irradiance unavailable: {type(exc).__name__}: {exc}")
+        if irr is None:
+            # Deliberately NOT falling back to the sunshine model: a silent
+            # model switch would make the entities unexplainable. Unknown sun
+            # keeps the awning in and raises Forecast data -> Problem.
+            events.warn("radiation forecast unavailable -> sun unknown "
+                        "(no silent fallback to the sunshine model)")
+
     # 3. decision (with hysteresis + temp gate)
     gust_sources_ok = bool(fc.get("gust_sources"))   # at least one answered
     # If a temperature gate is configured but no temperature was returned, the
@@ -162,9 +209,16 @@ def evaluate(session=None, prev_wind_high=False):
         gust_limit=GUST_LIMIT_KMH, temp_c=fc.get("temp_c"),
         gust_release=GUST_RELEASE_KMH, min_temp_c=MIN_TEMP_C,
         prev_wind_high=prev_wind_high, gust_sources_ok=gust_sources_ok,
-        sun_awning=_sun_at(fc, SUN_MIN_AWNING),
-        sun_backup=_sun_at(fc, SUN_MIN_BACKUP),
-        sun_independent=_sun_at(fc, SUN_MIN_INDEPENDENT))
+        sun_awning=(_sun_at(fc, SUN_MIN_AWNING) if SUN_MODEL == "sunshine"
+                    else _sun_from_irradiance(irr, TILT_AWNING,
+                                              IRRADIANCE_MIN_AWNING)),
+        sun_backup=(_sun_at(fc, SUN_MIN_BACKUP) if SUN_MODEL == "sunshine"
+                    else _sun_from_irradiance(irr, TILT_BLIND,
+                                              IRRADIANCE_MIN_BACKUP)),
+        sun_independent=(_sun_at(fc, SUN_MIN_INDEPENDENT)
+                         if SUN_MODEL == "sunshine"
+                         else _sun_from_irradiance(irr, TILT_BLIND,
+                                                   IRRADIANCE_MIN_INDEPENDENT)))
 
     # surface degradations as warnings (they populate the Last warning sensor)
     if fc.get("on_backup"):
@@ -197,6 +251,15 @@ def evaluate(session=None, prev_wind_high=False):
         "temp_c": fc.get("temp_c"),
         "forecast_unavailable": dec["forecast_unavailable"],
         "temp_blocks": dec["temp_blocks"],
+        "sun_model": SUN_MODEL,
+        "irradiance_awning": (round(irr[TILT_AWNING]["total"])
+                              if irr and irr.get(TILT_AWNING) else None),
+        "irradiance_wall": (round(irr[TILT_BLIND]["total"])
+                            if irr and irr.get(TILT_BLIND) else None),
+        "ghi": round(irr["ghi"]) if irr and irr.get("ghi") is not None else None,
+        "diffuse_fraction": (round(100 * irr["diffuse_fraction"])
+                             if irr and irr.get("diffuse_fraction") is not None
+                             else None),
         "forecast_source": fc["forecast_source"],
         "gust_sources": fc["gust_sources"],
         "gust_official": fc["gust_sources"].get("official"),
@@ -241,6 +304,19 @@ SENSORS = [
     ("gust_kmh", "Forecast gust", "gust_kmh", "km/h", None),
     ("sunshine_minutes", "Forecast sunshine", "sunshine_minutes", "min", None),
     ("temp_c", "Forecast temperature", "temp_c", "°C", None),
+    # Irradiance model. The two POA sensors are weather INPUTS to the decision
+    # (like Forecast sunshine), so they are primary; GHI and diffuse fraction
+    # explain where they came from, so they are diagnostic. All four read
+    # Unknown under the sunshine model, which is the honest representation --
+    # they are not being computed at all.
+    ("irradiance_awning", "Irradiance (awning, 45°)", "irradiance_awning",
+     "W/m²", None),
+    ("irradiance_wall", "Irradiance (blind, vertical)", "irradiance_wall",
+     "W/m²", None),
+    ("ghi", "Global radiation", "ghi", "W/m²", "diagnostic"),
+    ("diffuse_fraction", "Diffuse fraction", "diffuse_fraction", "%",
+     "diagnostic"),
+    ("sun_model", "Sun model", "sun_model", None, "diagnostic"),
     ("forecast_source", "Forecast source", "forecast_source", None, "diagnostic"),
     ("radar_age_min", "Radar age", "radar_age_min", "min", "diagnostic"),
     ("reason", "Shade reason", "reason", None, "diagnostic"),
@@ -268,9 +344,11 @@ EVENT_ENTITIES = [
 ]
 
 # numeric sensors need value_template guards so JSON null doesn't become "None"
-_NULLABLE_STR = {"forecast_source"}   # B8: else Jinja renders the string "None"
+_NULLABLE_STR = {"forecast_source", "sun_model"}   # B8: else Jinja renders the string "None"
 _NUMERIC = {"gust_kmh", "sunshine_minutes", "temp_c", "radar_age_min",
-            "gust_official", "gust_app", "gust_openmeteo"}
+            "gust_official", "gust_app", "gust_openmeteo",
+            "irradiance_awning", "irradiance_wall", "ghi",
+            "diffuse_fraction"}
 
 
 def _num_tmpl(key):
