@@ -11,7 +11,7 @@ correct.
 <repo root>/                  = https://github.com/CHfish-ch/ha-addons (public)
 ├── repository.yaml          name/url/maintainer shown in the Add-on Store
 ├── swiss_meteo_shade/       THE ADD-ON — one top-level folder per add-on in this repo
-│   ├── config.yaml          manifest, 24 options
+│   ├── config.yaml          manifest, 25 options
 │   ├── Dockerfile           COPY paths are relative to this dir; no change needed
 │   ├── run.py               entrypoint
 │   ├── shade.py             orchestrator + MQTT discovery
@@ -293,11 +293,17 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   (minutes/hour) is the default and unchanged; `irradiance` computes W/m2 on
   the surface from `gre000h0`/`ods000h0`. Only the selected model's thresholds
   are read. Radiation is fetched ONLY under the irradiance model -- it is
-  another ~60 MB of files. A failed radiation fetch yields sun=None (unknown),
-  never a silent fall back to sunshine: the entities have to stay explainable,
-  and `test_sun_model.py` asserts the sunshine value cannot leak through.
-  Tilt mapping is physical, not configurable: awning 45 deg, both blinds
-  vertical.
+  another ~60 MB of files. A failed radiation fetch **falls back to the
+  sunshine model** -- availability beats strictness, and only the official
+  source carries radiation so the outage is realistic. Never silently, though:
+  `Sun model` reports `sunshine_fallback`, a warning fires, and the Irradiance
+  sensors go Unknown rather than holding a stale value. If sunshine is missing
+  too the sun stays unknown -- the fallback must not invent a signal.
+  `awning_tilt` IS configurable (default 45, but real retractable awnings are
+  5-35 and the direct term differs a lot at low sun -- 0.906 vs 0.574 at 20
+  deg elevation for 45 vs 15). `TILT_BLIND` is fixed at 90: a blind is
+  vertical by definition. Don't put the angle in the entity NAME -- it is a
+  setting, and the name would lie.
   **The irradiance figure is an UPPER BOUND** -- the surface is assumed to face
   the sun, so azimuth cancels out of the geometry. That is what keeps one
   number valid for every window; which window the sun is on stays an
@@ -377,7 +383,7 @@ config changes came out of the investigation:
 - 27 MQTT entities. Operational: recommendation, the three shade decisions, and
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
-- 24 config options, all documented in `README.md` **and** `translations/en.yaml`.
+- 25 config options, all documented in `README.md` **and** `translations/en.yaml`.
 - Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 4 options + 5 forecast + 9 device-link, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab

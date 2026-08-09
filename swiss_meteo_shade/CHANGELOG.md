@@ -22,10 +22,14 @@ alter how your covers move is called out explicitly.
   surface geometry — a low winter sun hits a *vertical* blind almost head-on
   while grazing a 45° awning, and vice versa in summer. Each output is judged
   on the plane it physically is.
-- Options for the irradiance model: `albedo` (ground reflectance — over snow
-  this alone can add 200 W/m² to a blind), `min_solar_elevation` (raise it to
-  match a real horizon of buildings or trees), and `irradiance_substeps`.
-- Sensors `Irradiance (awning, 45°)` and `Irradiance (blind, vertical)`, plus
+- Options for the irradiance model: `awning_tilt` (your awning's pitch —
+  retractable terrace awnings are typically 5–35°, and a shallow one catches
+  markedly less direct sun than the 45° default, especially at low sun),
+  `albedo` (ground reflectance — over snow this alone can add 200 W/m² to a
+  blind), `min_solar_elevation` (raise it to match a real horizon of buildings
+  or trees), and `irradiance_substeps`. Blinds are always vertical and have no
+  tilt option — that is what a blind is.
+- Sensors `Irradiance (awning)` and `Irradiance (blind, vertical)`, plus
   `Global radiation`, `Diffuse fraction` and `Sun model` as diagnostics. All
   read Unknown under the `sunshine` model, since nothing is being computed.
 
@@ -35,11 +39,15 @@ alter how your covers move is called out explicitly.
   ignored rather than combined.
 - Radiation is only fetched when the irradiance model is selected, so the
   default costs nothing extra.
-- If the radiation forecast is unavailable the sun signal becomes **unknown**
-  (shade kept in, `Forecast data` → *Problem*) rather than quietly reverting
-  to the sunshine model — a silent model switch would make the entities
-  impossible to interpret. Only the official source carries radiation, so
-  there is no app fallback for this model.
+- If the radiation forecast is unavailable, the add-on **falls back to the
+  sunshine model** for that cycle using your `sun_min_*` thresholds — an
+  outage should not stop the shade working when a good sunshine forecast is in
+  hand, and only the official source carries radiation, so this is a realistic
+  failure to plan for. The switch is announced, never silent: `Sun model`
+  reads `sunshine_fallback`, a warning lands on `Last warning`, and the
+  `Warning` event entity fires. The `Irradiance` sensors go Unknown rather
+  than holding a stale figure. If sunshine is missing too, the sun is
+  genuinely unknown and the shade is kept in.
 - The irradiance figure assumes the surface faces the sun, making it an upper
   bound that holds for every window on the building. *Which* window the sun is
   actually on remains a question for your automation — see the sun-position

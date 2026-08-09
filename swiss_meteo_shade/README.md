@@ -116,8 +116,20 @@ things the minutes model cannot:
   crossover is at 22.5° of solar elevation — below it the blind collects more,
   above it the awning does. The two `Irradiance` sensors show this directly.
 
-Each output is judged on the plane it physically is: the awning on a 45°
+Each output is judged on the plane it physically is: the awning on a sloped
 surface, both blind outputs on a vertical one.
+
+**Set `awning_tilt` to your awning's actual pitch.** The default of 45° is
+steeper than most retractable terrace awnings, which typically sit at 5–35°,
+often around 15°, and the difference is not cosmetic — a shallow awning
+catches noticeably less direct sun, and the gap widens as the sun drops:
+
+| Sun elevation | direct term at 45° | at 15° |
+| --- | --- | --- |
+| 40° | 0.996 | 0.819 |
+| 20° | 0.906 | 0.574 |
+
+Blinds have no equivalent option: a blind is vertical by definition.
 
 > **What the number means.** The surface is assumed to always face the sun, so
 > the figure is an **upper bound** — a real facade with a fixed orientation
@@ -133,11 +145,18 @@ ignored, not combined. The `Sun model` diagnostic sensor reports which one is
 live. Radiation is only fetched when the irradiance model is selected, so the
 default costs nothing extra.
 
-If the radiation forecast is unavailable, the sun signal becomes **unknown**
-(`Forecast data` → *Problem*, shade kept in) rather than silently reverting to
-the sunshine model — a quiet model switch would make the entities impossible
-to interpret. Note that only the official source carries radiation; the app
-feed has no equivalent, so there is no fallback for this model.
+**If the radiation forecast is unavailable** the add-on falls back to the
+sunshine model for that cycle, using your `sun_min_*` thresholds — an outage
+should not stop the shade working when a perfectly good sunshine forecast is
+in hand. Only the official source carries radiation (the app feed has no
+equivalent), so this is a realistic failure to plan for.
+
+The switch is never silent. Three things show it: `Sun model` reads
+`sunshine_fallback`, a warning is recorded on `Last warning`, and the
+`Warning` event entity fires — so you can alert on it exactly as on the
+forecast-source fallback. The two `Irradiance` sensors go Unknown rather than
+holding a stale figure. If sunshine is missing *too*, the sun signal is
+genuinely unknown and the shade is kept in (`Forecast data` → *Problem*).
 
 **Design choice — forecast-only, no live wind sensor.** An earlier design used a
 measured gust from the nearest weather station, but that data arrives with a
@@ -262,6 +281,7 @@ Open the app's **Configuration** tab:
 | `irradiance_min_awning` | *(irradiance model)* W/m² on a 45° plane before the **awning** extends | `250` |
 | `irradiance_min_backup` | *(irradiance model)* W/m² on a vertical plane before the **backup blind** closes | `250` |
 | `irradiance_min_independent` | *(irradiance model)* W/m² on a vertical plane before the **independent blinds** close | `250` |
+| `awning_tilt` | *(irradiance model)* your awning's pitch in ° from horizontal | `45` |
 | `albedo` | *(irradiance model)* ground reflectance, 0–0.9 | `0.20` |
 | `min_solar_elevation` | *(irradiance model)* ignore the direct beam below this sun height (°) | `3.0` |
 | `irradiance_substeps` | *(irradiance model)* sun-path samples per hour | `12` |
@@ -327,7 +347,7 @@ not sunny). A present-but-low gust is trusted normally and does **not** trigger
 this.)
 
 **Irradiance model sensors** (all read Unknown under the `sunshine` model,
-since nothing is being computed): `irradiance_awning` (W/m² on the 45° plane)
+since nothing is being computed): `irradiance_awning` (W/m² on the awning's plane, per `awning_tilt`)
 and `irradiance_wall` (W/m² on the vertical plane) are the weather inputs the
 decision uses; `ghi` (global radiation as forecast) and `diffuse_fraction`
 (what share of it is diffuse — high means overcast) are diagnostics showing

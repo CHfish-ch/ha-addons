@@ -54,6 +54,10 @@ SUN_MIN_INDEPENDENT = 20
 IRRADIANCE_MIN_AWNING = 250
 IRRADIANCE_MIN_BACKUP = 250
 IRRADIANCE_MIN_INDEPENDENT = 250
+# The awning's pitch is configurable because it genuinely varies between
+# installations (5-35 deg is typical for a retractable terrace awning) and
+# it changes the direct term materially at low sun. A blind is vertical by
+# definition, so TILT_BLIND is fixed.
 TILT_AWNING = 45
 TILT_BLIND = 90
 ALBEDO = 0.20
@@ -125,6 +129,22 @@ def _sun_from_irradiance(irr, tilt, threshold):
     return poa["total"] >= threshold
 
 
+def _sun_flags(fc, irr, model):
+    """(awning, backup, independent) sun flags for the model actually in use.
+
+    `model` is the ACTIVE model, which is not always the configured one -- see
+    the fallback in evaluate().
+    """
+    if model == "irradiance":
+        return (_sun_from_irradiance(irr, TILT_AWNING, IRRADIANCE_MIN_AWNING),
+                _sun_from_irradiance(irr, TILT_BLIND, IRRADIANCE_MIN_BACKUP),
+                _sun_from_irradiance(irr, TILT_BLIND,
+                                     IRRADIANCE_MIN_INDEPENDENT))
+    return (_sun_at(fc, SUN_MIN_AWNING),
+            _sun_at(fc, SUN_MIN_BACKUP),
+            _sun_at(fc, SUN_MIN_INDEPENDENT))
+
+
 def _events_state():
     """Flatten the latest error/warning into state fields for the two sensors.
 
@@ -181,23 +201,29 @@ def evaluate(session=None, prev_wind_high=False):
     # 2b. irradiance, only when that model is selected -- it is another ~60 MB
     # of radiation files, so it is never fetched for the sunshine model.
     irr = None
+    sun_model_active = SUN_MODEL
     if SUN_MODEL == "irradiance":
         try:
             irr = forecast.irradiance_now(
                 e, n, lat, lon, session=session,
-                tilts=(TILT_BLIND, TILT_AWNING), albedo=ALBEDO,
+                tilts=tuple({TILT_BLIND, TILT_AWNING}), albedo=ALBEDO,
                 min_elevation=MIN_SOLAR_ELEVATION,
                 substeps=IRRADIANCE_SUBSTEPS)
         except Exception as exc:
             events.warn(f"irradiance unavailable: {type(exc).__name__}: {exc}")
         if irr is None:
-            # Deliberately NOT falling back to the sunshine model: a silent
-            # model switch would make the entities unexplainable. Unknown sun
-            # keeps the awning in and raises Forecast data -> Problem.
-            events.warn("radiation forecast unavailable -> sun unknown "
-                        "(no silent fallback to the sunshine model)")
+            # Fall back to the sunshine model rather than losing the sun
+            # signal outright -- a radiation outage should not stop the shade
+            # working when a perfectly good sunshine forecast is in hand. The
+            # switch is never SILENT: it warns (Last warning + the Warning
+            # event entity) and `Sun model` reports `sunshine_fallback`, so
+            # the entities still explain themselves.
+            sun_model_active = "sunshine_fallback"
+            events.warn("radiation forecast unavailable -> falling back to "
+                        "the sunshine model (thresholds sun_min_*)")
 
     # 3. decision (with hysteresis + temp gate)
+    _sun_a, _sun_b, _sun_i = _sun_flags(fc, irr, sun_model_active)
     gust_sources_ok = bool(fc.get("gust_sources"))   # at least one answered
     # If a temperature gate is configured but no temperature was returned, the
     # gate can't apply this cycle -- log it rather than silently ignoring.
@@ -209,16 +235,7 @@ def evaluate(session=None, prev_wind_high=False):
         gust_limit=GUST_LIMIT_KMH, temp_c=fc.get("temp_c"),
         gust_release=GUST_RELEASE_KMH, min_temp_c=MIN_TEMP_C,
         prev_wind_high=prev_wind_high, gust_sources_ok=gust_sources_ok,
-        sun_awning=(_sun_at(fc, SUN_MIN_AWNING) if SUN_MODEL == "sunshine"
-                    else _sun_from_irradiance(irr, TILT_AWNING,
-                                              IRRADIANCE_MIN_AWNING)),
-        sun_backup=(_sun_at(fc, SUN_MIN_BACKUP) if SUN_MODEL == "sunshine"
-                    else _sun_from_irradiance(irr, TILT_BLIND,
-                                              IRRADIANCE_MIN_BACKUP)),
-        sun_independent=(_sun_at(fc, SUN_MIN_INDEPENDENT)
-                         if SUN_MODEL == "sunshine"
-                         else _sun_from_irradiance(irr, TILT_BLIND,
-                                                   IRRADIANCE_MIN_INDEPENDENT)))
+        sun_awning=_sun_a, sun_backup=_sun_b, sun_independent=_sun_i)
 
     # surface degradations as warnings (they populate the Last warning sensor)
     if fc.get("on_backup"):
@@ -251,7 +268,7 @@ def evaluate(session=None, prev_wind_high=False):
         "temp_c": fc.get("temp_c"),
         "forecast_unavailable": dec["forecast_unavailable"],
         "temp_blocks": dec["temp_blocks"],
-        "sun_model": SUN_MODEL,
+        "sun_model": sun_model_active,
         "irradiance_awning": (round(irr[TILT_AWNING]["total"])
                               if irr and irr.get(TILT_AWNING) else None),
         "irradiance_wall": (round(irr[TILT_BLIND]["total"])
@@ -309,7 +326,7 @@ SENSORS = [
     # explain where they came from, so they are diagnostic. All four read
     # Unknown under the sunshine model, which is the honest representation --
     # they are not being computed at all.
-    ("irradiance_awning", "Irradiance (awning, 45°)", "irradiance_awning",
+    ("irradiance_awning", "Irradiance (awning)", "irradiance_awning",
      "W/m²", None),
     ("irradiance_wall", "Irradiance (blind, vertical)", "irradiance_wall",
      "W/m²", None),

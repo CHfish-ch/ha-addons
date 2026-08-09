@@ -27,6 +27,7 @@ options:
   irradiance_min_awning: 250
   irradiance_min_backup: 250
   irradiance_min_independent: 250
+  awning_tilt: 45
   albedo: 0.20
   min_solar_elevation: 3.0
   irradiance_substeps: 12
@@ -52,6 +53,7 @@ schema:
   irradiance_min_awning: int(0,1200)
   irradiance_min_backup: int(0,1200)
   irradiance_min_independent: int(0,1200)
+  awning_tilt: int(0,90)
   albedo: float(0,0.9)
   min_solar_elevation: float(0,30)
   irradiance_substeps: int(6,60)
