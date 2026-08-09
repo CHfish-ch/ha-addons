@@ -146,7 +146,8 @@ def apply_options(opts):
     shade.IRRADIANCE_MIN_INDEPENDENT = _num(g("irradiance_min_independent"),
                                             250, int,
                                             "irradiance_min_independent")
-    shade.TILT_AWNING = _num(g("awning_tilt"), 45, int, "awning_tilt")
+    shade.AWNING_MIN_ELEVATION = _num(g("awning_min_elevation"), 35,
+                                      int, "awning_min_elevation")
     shade.ALBEDO = _num(g("albedo"), 0.20, float, "albedo")
     shade.MIN_SOLAR_ELEVATION = _num(g("min_solar_elevation"), 3.0, float,
                                      "min_solar_elevation")

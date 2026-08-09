@@ -299,11 +299,18 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   `Sun model` reports `sunshine_fallback`, a warning fires, and the Irradiance
   sensors go Unknown rather than holding a stale value. If sunshine is missing
   too the sun stays unknown -- the fallback must not invent a signal.
-  `awning_tilt` IS configurable (default 45, but real retractable awnings are
-  5-35 and the direct term differs a lot at low sun -- 0.906 vs 0.574 at 20
-  deg elevation for 45 vs 15). `TILT_BLIND` is fixed at 90: a blind is
-  vertical by definition. Don't put the angle in the entity NAME -- it is a
-  setting, and the name would lie.
+  **All three outputs read the VERTICAL (window) plane.** An early version
+  judged the awning on a 45 deg plane -- the irradiance on its own fabric --
+  which is not merely imprecise but ANTI-CORRELATED with what matters: sun
+  entering a room peaks at LOW elevation (885 W/m2 vertical at 10 deg vs 529
+  at 65), while a 45 deg surface peaks near 50. An awning is a shading device,
+  not a collector; what lands on the fabric is irrelevant.
+  The awning's real constraint is geometric and separate: it shades only while
+  `elevation >= atan(H / P)` (height above sill / projection), typically
+  27-51 deg. That is `AWNING_MIN_ELEVATION`, and it gates the awning ONLY --
+  a blind works at any sun height, which is exactly why a blind is the tool
+  for low evening sun. The gate may turn a known True into False; it must
+  never turn an unknown into False.
   **The irradiance figure is an UPPER BOUND** -- the surface is assumed to face
   the sun, so azimuth cancels out of the geometry. That is what keeps one
   number valid for every window; which window the sun is on stays an

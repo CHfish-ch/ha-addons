@@ -111,25 +111,36 @@ things the minutes model cannot:
   sun 700–1000.
 - **Diffuse light.** On a heavily overcast day a vertical blind still receives
   real heat, and half of what it sees is sky.
-- **Geometry.** A low winter sun strikes a *vertical* blind almost head-on
-  while barely grazing a 45° awning; a high summer sun does the opposite. The
-  crossover is at 22.5° of solar elevation — below it the blind collects more,
-  above it the awning does. The two `Irradiance` sensors show this directly.
+- **Geometry.** Sun entering a room **peaks when the sun is low**, not high —
+  a low beam shines straight through the glass and reaches deep inside, while
+  a high summer sun mostly strikes the roof and the ground. On a clear day the
+  window plane sees roughly 885 W/m² at 10° of elevation but only 529 at 65°.
+  The minutes model cannot express this at all.
 
-Each output is judged on the plane it physically is: the awning on a sloped
-surface, both blind outputs on a vertical one.
+All three outputs are judged on the **window** plane (vertical), because what
+matters is sun entering the room — not sun landing on a shading device.
 
-**Set `awning_tilt` to your awning's actual pitch.** The default of 45° is
-steeper than most retractable terrace awnings, which typically sit at 5–35°,
-often around 15°, and the difference is not cosmetic — a shallow awning
-catches noticeably less direct sun, and the gap widens as the sun drops:
+**`awning_min_elevation` — why the awning alone needs a second condition.**
+An awning is a horizontal projection above the window, so it only shades while
+the sun is high enough; below that the beam simply passes underneath and the
+awning shades nothing. That limit is pure geometry:
 
-| Sun elevation | direct term at 45° | at 15° |
-| --- | --- | --- |
-| 40° | 0.996 | 0.819 |
-| 20° | 0.906 | 0.574 |
+```
+minimum elevation = atan( H / P )      H = awning height above the sill
+                                       P = how far it projects
+```
 
-Blinds have no equivalent option: a blind is vertical by definition.
+| Awning | needs |
+| --- | --- |
+| 2.5 m high, 2.0 m out | 51° |
+| 2.5 m high, 3.0 m out | 40° |
+| 2.2 m high, 3.5 m out | 32° |
+| 2.0 m high, 4.0 m out | 27° |
+
+Measure yours and set the option; the default is 35°. Below it the awning
+stays in even in blazing sun, which is correct — it could not have helped.
+Blinds have no such gate: they block sun at any height, which is precisely why
+they are the tool for a low evening sun.
 
 > **What the number means.** The surface is assumed to always face the sun, so
 > the figure is an **upper bound** — a real facade with a fixed orientation
@@ -278,10 +289,10 @@ Open the app's **Configuration** tab:
 | `sun_min_awning` | *(sunshine model)* minutes of sun per hour before the **awning** extends | `20` |
 | `sun_min_backup` | *(sunshine model)* minutes of sun per hour before the **backup blind** closes | `20` |
 | `sun_min_independent` | *(sunshine model)* minutes of sun per hour before the **independent blinds** close | `20` |
-| `irradiance_min_awning` | *(irradiance model)* W/m² on a 45° plane before the **awning** extends | `250` |
-| `irradiance_min_backup` | *(irradiance model)* W/m² on a vertical plane before the **backup blind** closes | `250` |
-| `irradiance_min_independent` | *(irradiance model)* W/m² on a vertical plane before the **independent blinds** close | `250` |
-| `awning_tilt` | *(irradiance model)* your awning's pitch in ° from horizontal | `45` |
+| `irradiance_min_awning` | *(irradiance model)* W/m² on the **window** before the **awning** extends | `250` |
+| `irradiance_min_backup` | *(irradiance model)* W/m² on the window before the **backup blind** closes | `250` |
+| `irradiance_min_independent` | *(irradiance model)* W/m² on the window before the **independent blinds** close | `250` |
+| `awning_min_elevation` | *(irradiance model)* don't extend the awning below this sun height (°) | `35` |
 | `albedo` | *(irradiance model)* ground reflectance, 0–0.9 | `0.20` |
 | `min_solar_elevation` | *(irradiance model)* ignore the direct beam below this sun height (°) | `3.0` |
 | `irradiance_substeps` | *(irradiance model)* sun-path samples per hour | `12` |
@@ -347,15 +358,15 @@ not sunny). A present-but-low gust is trusted normally and does **not** trigger
 this.)
 
 **Irradiance model sensors** (all read Unknown under the `sunshine` model,
-since nothing is being computed): `irradiance_awning` (W/m² on the awning's plane, per `awning_tilt`)
-and `irradiance_wall` (W/m² on the vertical plane) are the weather inputs the
-decision uses; `ghi` (global radiation as forecast) and `diffuse_fraction`
-(what share of it is diffuse — high means overcast) are diagnostics showing
-where those came from. `sun_model` reports which model is live.
+since nothing is being computed): `irradiance_window` (W/m² arriving on the
+window plane) is the weather input all three decisions use. `ghi` (global
+radiation as forecast), `diffuse_fraction` (what share is diffuse — high means
+overcast), `solar_elevation` (which gates the awning) and `sun_model` are
+diagnostics.
 
-Solar elevation and azimuth are deliberately **not** published: Home
-Assistant's built-in `sun.sun` already provides both, and duplicating them
-would add entities that disagree with it after a restart.
+Solar *azimuth* is deliberately not published: `sun.sun` already provides it
+and nothing here uses it, since the irradiance figure is orientation-agnostic
+by design.
 
 **Values (sensors):** `shade_recommendation` (**the enum: `extend` / `backup` /
 `none` — trigger automations on this**), `forecast_gust` (km/h),

@@ -40,16 +40,16 @@ configuration:
     description: "Sunshine threshold for the independent blinds, which have no wind or rain vulnerability. Often set lower than the awning (e.g. 5-10) so interior glare/heat blinds come down even in weaker sun. 20 default."
   irradiance_min_awning:
     name: Awning irradiance threshold (W/m2)
-    description: "Only used when Sun model is 'irradiance'. Solar power on a 45 degree surface at or above which the awning extends. For scale: overcast is roughly 100-200, hazy sun 300-500, full clear sun 700-1000. 250 is a starting point and wants tuning against how your terrace actually feels."
+    description: "Only used when Sun model is 'irradiance'. Solar power on the WINDOW (vertical) at or above which the awning extends - what matters is sun entering the room, not sun landing on the awning fabric. For scale: overcast is roughly 100-200, hazy sun 300-500, full clear sun 700-1000. 250 is a starting point and wants tuning against how your terrace actually feels."
   irradiance_min_backup:
     name: Backup-blind irradiance threshold (W/m2)
-    description: "Only used when Sun model is 'irradiance'. Threshold for the backup blind, judged on a vertical (90 degree) surface. Independent of the awning threshold."
+    description: "Only used when Sun model is 'irradiance'. Threshold for the backup blind, judged on the same window plane. Independent of the awning threshold."
   irradiance_min_independent:
     name: Independent-blind irradiance threshold (W/m2)
-    description: "Only used when Sun model is 'irradiance'. Threshold for the independent blinds, judged on a vertical (90 degree) surface. Often set lower than the awning so interior glare blinds come down in weaker sun."
-  awning_tilt:
-    name: Awning pitch (degrees from horizontal)
-    description: "Only used when Sun model is 'irradiance'. The slope of your awning: 0 is flat, 90 is vertical. Retractable terrace awnings are typically 5-35, often around 15; 45 is the model default and is steeper than most. Pitch matters because a shallow awning catches far less direct sun than a steep one, especially when the sun is low. Blinds are always treated as vertical (90) and are not affected."
+    description: "Only used when Sun model is 'irradiance'. Threshold for the independent blinds, judged on the same window plane. Often set lower than the awning so interior glare blinds come down in weaker sun."
+  awning_min_elevation:
+    name: Awning minimum sun elevation (degrees)
+    description: "Only used when Sun model is 'irradiance'. Below this sun height the awning does not extend, because the beam passes underneath it and the awning would shade nothing. Compute yours as atan(H / P) in degrees, where H is the awning's height above the window sill and P is how far it projects: 2.5 m high and 3 m out gives 40; 2 m high and 4 m out gives 27. Blinds are not gated - they block sun at any height."
   albedo:
     name: Ground albedo
     description: "Only used when Sun model is 'irradiance'. How much light the ground reflects back onto a vertical surface, which sees as much ground as sky. Fresh snow 0.75, old snow 0.45, gravel or concrete terrace 0.30, grass 0.20, dark asphalt 0.10. Over snow this alone can add 200 W/m2 to a blind."

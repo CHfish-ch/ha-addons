@@ -48,18 +48,24 @@ SUN_MODEL = "sunshine"                # how "sunny enough" is judged
 SUN_MIN_AWNING = 20                   # per-output sunshine thresholds (min/h)
 SUN_MIN_BACKUP = 20
 SUN_MIN_INDEPENDENT = 20
-# Irradiance model. Thresholds are W/m2 on the surface; the awning is judged
-# on a 45 deg plane and both blinds on a vertical one, since that is what they
-# physically are. Only one set of thresholds is ever consulted -- see SUN_MODEL.
+# Irradiance model. Thresholds are W/m2 on the WINDOW plane (vertical) for all
+# three outputs: what matters is sun entering the room, not sun landing on a
+# shading device. Only one set of thresholds is consulted -- see SUN_MODEL.
 IRRADIANCE_MIN_AWNING = 250
 IRRADIANCE_MIN_BACKUP = 250
 IRRADIANCE_MIN_INDEPENDENT = 250
-# The awning's pitch is configurable because it genuinely varies between
-# installations (5-35 deg is typical for a retractable terrace awning) and
-# it changes the direct term materially at low sun. A blind is vertical by
-# definition, so TILT_BLIND is fixed.
-TILT_AWNING = 45
-TILT_BLIND = 90
+# Every output is judged on the vertical window plane. An awning was once
+# judged on a 45 deg plane -- the irradiance on its own fabric -- which is
+# anti-correlated with the thing that matters: sun entering a room PEAKS at low
+# elevation (885 W/m2 vertical at 10 deg vs 529 at 65), while a 45 deg surface
+# peaks near 50 deg. The awning's real limit is geometric, below.
+TILT_WINDOW = 90
+
+# An awning projecting P from the wall at height H above the sill shades the
+# window only while elevation >= atan(H / P); below that the beam passes
+# underneath and the awning is decorative. Typical installations land at
+# 27-51 deg. This gates the AWNING only -- a blind works at any sun height.
+AWNING_MIN_ELEVATION = 35
 ALBEDO = 0.20
 MIN_SOLAR_ELEVATION = 3.0
 IRRADIANCE_SUBSTEPS = 12
@@ -136,9 +142,14 @@ def _sun_flags(fc, irr, model):
     the fallback in evaluate().
     """
     if model == "irradiance":
-        return (_sun_from_irradiance(irr, TILT_AWNING, IRRADIANCE_MIN_AWNING),
-                _sun_from_irradiance(irr, TILT_BLIND, IRRADIANCE_MIN_BACKUP),
-                _sun_from_irradiance(irr, TILT_BLIND,
+        awning = _sun_from_irradiance(irr, TILT_WINDOW, IRRADIANCE_MIN_AWNING)
+        # Geometric gate: enough sun, but too low for the awning to block it.
+        # Only False-ify a known True -- an unknown must stay unknown.
+        if awning and (irr or {}).get("elevation", 90) < AWNING_MIN_ELEVATION:
+            awning = False
+        return (awning,
+                _sun_from_irradiance(irr, TILT_WINDOW, IRRADIANCE_MIN_BACKUP),
+                _sun_from_irradiance(irr, TILT_WINDOW,
                                      IRRADIANCE_MIN_INDEPENDENT))
     return (_sun_at(fc, SUN_MIN_AWNING),
             _sun_at(fc, SUN_MIN_BACKUP),
@@ -206,7 +217,7 @@ def evaluate(session=None, prev_wind_high=False):
         try:
             irr = forecast.irradiance_now(
                 e, n, lat, lon, session=session,
-                tilts=tuple({TILT_BLIND, TILT_AWNING}), albedo=ALBEDO,
+                tilts=(TILT_WINDOW,), albedo=ALBEDO,
                 min_elevation=MIN_SOLAR_ELEVATION,
                 substeps=IRRADIANCE_SUBSTEPS)
         except Exception as exc:
@@ -269,10 +280,11 @@ def evaluate(session=None, prev_wind_high=False):
         "forecast_unavailable": dec["forecast_unavailable"],
         "temp_blocks": dec["temp_blocks"],
         "sun_model": sun_model_active,
-        "irradiance_awning": (round(irr[TILT_AWNING]["total"])
-                              if irr and irr.get(TILT_AWNING) else None),
-        "irradiance_wall": (round(irr[TILT_BLIND]["total"])
-                            if irr and irr.get(TILT_BLIND) else None),
+        "irradiance_window": (round(irr[TILT_WINDOW]["total"])
+                              if irr and irr.get(TILT_WINDOW) else None),
+        "solar_elevation": (round(irr["elevation"], 1)
+                            if irr and irr.get("elevation") is not None
+                            else None),
         "ghi": round(irr["ghi"]) if irr and irr.get("ghi") is not None else None,
         "diffuse_fraction": (round(100 * irr["diffuse_fraction"])
                              if irr and irr.get("diffuse_fraction") is not None
@@ -326,10 +338,10 @@ SENSORS = [
     # explain where they came from, so they are diagnostic. All four read
     # Unknown under the sunshine model, which is the honest representation --
     # they are not being computed at all.
-    ("irradiance_awning", "Irradiance (awning)", "irradiance_awning",
+    ("irradiance_window", "Irradiance (window)", "irradiance_window",
      "W/m²", None),
-    ("irradiance_wall", "Irradiance (blind, vertical)", "irradiance_wall",
-     "W/m²", None),
+    ("solar_elevation", "Solar elevation", "solar_elevation", "°",
+     "diagnostic"),
     ("ghi", "Global radiation", "ghi", "W/m²", "diagnostic"),
     ("diffuse_fraction", "Diffuse fraction", "diffuse_fraction", "%",
      "diagnostic"),
@@ -364,7 +376,7 @@ EVENT_ENTITIES = [
 _NULLABLE_STR = {"forecast_source", "sun_model"}   # B8: else Jinja renders the string "None"
 _NUMERIC = {"gust_kmh", "sunshine_minutes", "temp_c", "radar_age_min",
             "gust_official", "gust_app", "gust_openmeteo",
-            "irradiance_awning", "irradiance_wall", "ghi",
+            "irradiance_window", "solar_elevation", "ghi",
             "diffuse_fraction"}
 
 

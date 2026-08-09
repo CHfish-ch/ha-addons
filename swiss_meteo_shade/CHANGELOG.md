@@ -19,19 +19,21 @@ alter how your covers move is called out explicitly.
 
   It captures three things minutes-of-sunshine cannot: intensity (overcast
   ~100–200 W/m², clear sun 700–1000), diffuse light on an overcast day, and
-  surface geometry — a low winter sun hits a *vertical* blind almost head-on
-  while grazing a 45° awning, and vice versa in summer. Each output is judged
-  on the plane it physically is.
-- Options for the irradiance model: `awning_tilt` (your awning's pitch —
-  retractable terrace awnings are typically 5–35°, and a shallow one catches
-  markedly less direct sun than the 45° default, especially at low sun),
-  `albedo` (ground reflectance — over snow this alone can add 200 W/m² to a
-  blind), `min_solar_elevation` (raise it to match a real horizon of buildings
-  or trees), and `irradiance_substeps`. Blinds are always vertical and have no
-  tilt option — that is what a blind is.
-- Sensors `Irradiance (awning)` and `Irradiance (blind, vertical)`, plus
-  `Global radiation`, `Diffuse fraction` and `Sun model` as diagnostics. All
-  read Unknown under the `sunshine` model, since nothing is being computed.
+  geometry — sun entering a room **peaks when the sun is low**, roughly
+  885 W/m² on the window at 10° of elevation against 529 at 65°. All three
+  outputs are judged on the window plane, because what matters is sun
+  entering the room, not sun landing on a shading device.
+- `awning_min_elevation` — an awning only shades while the sun is high enough;
+  below that the beam passes underneath it. Compute yours as `atan(H / P)`
+  where H is the height above the sill and P the projection (2.5 m high and
+  3 m out = 40°). Default 35°. Blinds are not gated: they block sun at any
+  height, which is why they are the tool for a low evening sun.
+- Further irradiance options: `albedo` (ground reflectance — over snow this
+  alone can add 200 W/m² to a blind), `min_solar_elevation` (raise it to match
+  a real horizon of buildings or trees), and `irradiance_substeps`.
+- Sensor `Irradiance (window)`, plus `Global radiation`, `Diffuse fraction`,
+  `Solar elevation` and `Sun model` as diagnostics. All read Unknown under the
+  `sunshine` model, since nothing is being computed.
 
 ### Fixed
 
