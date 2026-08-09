@@ -51,8 +51,11 @@ SUN_MIN_INDEPENDENT = 20
 # Irradiance model. Thresholds are W/m2 on the WINDOW plane (vertical) for all
 # three outputs: what matters is sun entering the room, not sun landing on a
 # shading device. Only one set of thresholds is consulted -- see SUN_MODEL.
-IRRADIANCE_MIN_AWNING = 250
-IRRADIANCE_MIN_BACKUP = 250
+# The awning and the backup blind cover the SAME opening and are a strict
+# partition of one decision (see logic.awning_usable), so they share a
+# threshold. The independent blinds are different windows -- often interior
+# glare blinds wanted in weaker sun -- so they keep their own.
+IRRADIANCE_MIN_SHADE = 250
 IRRADIANCE_MIN_INDEPENDENT = 250
 # Every output is judged on the vertical window plane. An awning was once
 # judged on a 45 deg plane -- the irradiance on its own fabric -- which is
@@ -142,13 +145,9 @@ def _sun_flags(fc, irr, model):
     the fallback in evaluate().
     """
     if model == "irradiance":
-        awning = _sun_from_irradiance(irr, TILT_WINDOW, IRRADIANCE_MIN_AWNING)
-        # Geometric gate: enough sun, but too low for the awning to block it.
-        # Only False-ify a known True -- an unknown must stay unknown.
-        if awning and (irr or {}).get("elevation", 90) < AWNING_MIN_ELEVATION:
-            awning = False
-        return (awning,
-                _sun_from_irradiance(irr, TILT_WINDOW, IRRADIANCE_MIN_BACKUP),
+        shade_sun = _sun_from_irradiance(irr, TILT_WINDOW,
+                                         IRRADIANCE_MIN_SHADE)
+        return (shade_sun, shade_sun,
                 _sun_from_irradiance(irr, TILT_WINDOW,
                                      IRRADIANCE_MIN_INDEPENDENT))
     return (_sun_at(fc, SUN_MIN_AWNING),
@@ -235,6 +234,12 @@ def evaluate(session=None, prev_wind_high=False):
 
     # 3. decision (with hysteresis + temp gate)
     _sun_a, _sun_b, _sun_i = _sun_flags(fc, irr, sun_model_active)
+    # Can the awning physically shade right now? Only the irradiance model
+    # knows the sun's height; the sunshine model has no geometry, so it always
+    # says yes and decide() then behaves exactly as it always has.
+    awning_effective = True
+    if sun_model_active == "irradiance" and irr:
+        awning_effective = irr.get("elevation", 90) >= AWNING_MIN_ELEVATION
     gust_sources_ok = bool(fc.get("gust_sources"))   # at least one answered
     # If a temperature gate is configured but no temperature was returned, the
     # gate can't apply this cycle -- log it rather than silently ignoring.
@@ -246,7 +251,8 @@ def evaluate(session=None, prev_wind_high=False):
         gust_limit=GUST_LIMIT_KMH, temp_c=fc.get("temp_c"),
         gust_release=GUST_RELEASE_KMH, min_temp_c=MIN_TEMP_C,
         prev_wind_high=prev_wind_high, gust_sources_ok=gust_sources_ok,
-        sun_awning=_sun_a, sun_backup=_sun_b, sun_independent=_sun_i)
+        sun_awning=_sun_a, sun_backup=_sun_b, sun_independent=_sun_i,
+        awning_effective=awning_effective)
 
     # surface degradations as warnings (they populate the Last warning sensor)
     if fc.get("on_backup"):
@@ -267,6 +273,7 @@ def evaluate(session=None, prev_wind_high=False):
         "backup_blinds_close": dec["backup_blinds_close"],
         "independent_blinds_close": dec["independent_blinds_close"],
         "retract": dec["retract"],
+        "awning_usable": dec["awning_usable"],
         "recommendation": dec["recommendation"],
         "reason": dec["reason"],
         "rain": dec["rain"],

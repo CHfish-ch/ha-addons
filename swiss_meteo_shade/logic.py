@@ -52,7 +52,8 @@ _UNSET = object()      # B4: distinguishes "argument not supplied" from None
 def decide(rain, gust_kmh, sunshine, gust_limit,
            temp_c=None, gust_release=None, min_temp_c=None,
            prev_wind_high=False, gust_sources_ok=True,
-           sun_awning=_UNSET, sun_backup=_UNSET, sun_independent=_UNSET):
+           sun_awning=_UNSET, sun_backup=_UNSET, sun_independent=_UNSET,
+           awning_effective=True):
 
     """gust_sources_ok: True if at least one gust source answered this cycle.
     If NO gust source answered (all failed), we cannot vouch for wind safety,
@@ -91,8 +92,19 @@ def decide(rain, gust_kmh, sunshine, gust_limit,
     wind_high = _wind_high(gust_kmh, gust_limit, gust_release, prev_wind_high)
     retract = wind_high or rain or gust_missing
 
-    extend = sun_awning and not retract
-    backup = sun_backup and retract
+    # Two independent reasons the awning cannot do the job:
+    #   retract           -- UNSAFE (wind, rain, or no gust reading at all)
+    #   not awning_effective -- INEFFECTIVE (sun too low; the beam passes
+    #                        under it, so extending would shade nothing)
+    # The backup blind covers the same opening and works at any sun height, so
+    # it takes over in BOTH cases. Tying it to `retract` alone left a bright
+    # low evening sun with the awning correctly in and the blind pointlessly
+    # up. awning_effective defaults True, so the sunshine model -- which has
+    # no geometric gate -- behaves exactly as before.
+    awning_usable = (not retract) and bool(awning_effective)
+
+    extend = sun_awning and awning_usable
+    backup = sun_backup and not awning_usable
     indep = sun_independent
 
     if extend:
@@ -110,18 +122,20 @@ def decide(rain, gust_kmh, sunshine, gust_limit,
         "temp_blocks": temp_blocks,
         "rain": rain,
         "retract": retract,
+        "awning_usable": awning_usable,
         "awning_extend": extend,
         "backup_blinds_close": backup,
         "independent_blinds_close": indep,
         "recommendation": rec,
         "reason": _reason(sun, wind_high, rain, gust_kmh, gust_limit,
                           gust_missing, sunshine_missing, temp_blocks,
-                          temp_c, min_temp_c),
+                          temp_c, min_temp_c, awning_effective),
     }
 
 
 def _reason(sun, wind_high, rain, gust_kmh, gust_limit,
-            gust_missing, sunshine_missing, temp_blocks, temp_c, min_temp_c):
+            gust_missing, sunshine_missing, temp_blocks, temp_c, min_temp_c,
+            awning_effective=True):
     # Safety-first ordering: a missing gust reading is treated as unsafe.
     if gust_missing:
         return ("no gust forecast available (all sources failed) -> awning "
@@ -133,6 +147,9 @@ def _reason(sun, wind_high, rain, gust_kmh, gust_limit,
     if not sun:
         return "no significant sun expected"
     g = f"{gust_kmh:.0f}" if gust_kmh is not None else "?"
+    if (not wind_high) and (not rain) and not awning_effective:
+        return ("sun, but too low for the awning to shade -> backup blind "
+                "instead")
     if wind_high and rain:
         return f"sun, but gust {g}>={gust_limit:.0f} km/h and rain approaching"
     if wind_high:

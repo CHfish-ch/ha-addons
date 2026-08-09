@@ -11,7 +11,7 @@ correct.
 <repo root>/                  = https://github.com/CHfish-ch/ha-addons (public)
 ├── repository.yaml          name/url/maintainer shown in the Add-on Store
 ├── swiss_meteo_shade/       THE ADD-ON — one top-level folder per add-on in this repo
-│   ├── config.yaml          manifest, 25 options
+│   ├── config.yaml          manifest, 24 options
 │   ├── Dockerfile           COPY paths are relative to this dir; no change needed
 │   ├── run.py               entrypoint
 │   ├── shade.py             orchestrator + MQTT discovery
@@ -307,10 +307,21 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   not a collector; what lands on the fabric is irrelevant.
   The awning's real constraint is geometric and separate: it shades only while
   `elevation >= atan(H / P)` (height above sill / projection), typically
-  27-51 deg. That is `AWNING_MIN_ELEVATION`, and it gates the awning ONLY --
-  a blind works at any sun height, which is exactly why a blind is the tool
-  for low evening sun. The gate may turn a known True into False; it must
-  never turn an unknown into False.
+  27-51 deg. That is `AWNING_MIN_ELEVATION`.
+  **There are TWO reasons the awning cannot do the job, and the backup blind
+  covers both**: UNSAFE (`retract` -- wind/rain/no gust) and INEFFECTIVE (sun
+  too low). `logic.decide` takes `awning_effective` and computes
+  `awning_usable = not retract and awning_effective`; extend and backup then
+  partition on it. Tying backup to `retract` alone left a bright low evening
+  sun with the awning correctly in and the blind pointlessly up -- the opening
+  unshaded while the independent blinds closed. `awning_effective` defaults
+  True so the sunshine model, which has no geometry, is bit-for-bit unchanged
+  (its 25 tests passed untouched).
+  Because awning and backup are now a strict partition of ONE decision on the
+  SAME opening, they share `IRRADIANCE_MIN_SHADE`. Only the independent blinds
+  keep a separate threshold -- different windows, often wanted in weaker sun.
+  Do not re-split the shared threshold: unequal values reopen the
+  "neither fires" gap for no gain.
   **The irradiance figure is an UPPER BOUND** -- the surface is assumed to face
   the sun, so azimuth cancels out of the geometry. That is what keeps one
   number valid for every window; which window the sun is on stays an
@@ -429,7 +440,7 @@ config changes came out of the investigation:
 - 27 MQTT entities. Operational: recommendation, the three shade decisions, and
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
-- 25 config options, all documented in `README.md` **and** `translations/en.yaml`.
+- 24 config options, all documented in `README.md` **and** `translations/en.yaml`.
 - Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 4 options + 5 forecast + 9 device-link, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab

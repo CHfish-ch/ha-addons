@@ -62,13 +62,20 @@ From those:
 And the outputs:
 
 ```
-sun       = sunshine expected AND temperature gate passes
-retract   = wind_high OR rain OR (all gust sources failed)
+sun           = sun signal passes AND temperature gate passes
+retract       = wind_high OR rain OR (all gust sources failed)
+awning_usable = NOT retract AND awning can physically shade
 
-awning_extend            = sun AND NOT retract
-backup_blinds_close      = sun AND retract
+awning_extend            = sun AND awning_usable
+backup_blinds_close      = sun AND NOT awning_usable
 independent_blinds_close = sun
 ```
+
+There are **two** reasons the awning can't do the job, and the backup blind
+covers both: it is *unsafe* (wind, rain, or no gust reading at all), or it is
+*ineffective* — the sun is too low and the beam passes underneath it. The
+second only arises under the irradiance model, which knows the sun's height;
+the sunshine model has no geometry and always treats the awning as effective.
 
 Where `wind_high` uses hysteresis around `gust_limit_kmh` / `gust_release_kmh`,
 and the temperature gate (`min_temp_c`) — if set — blocks *all* shade below the
@@ -80,15 +87,17 @@ When it is not sunny, none of the three fire. `awning_extend` and
 other requires `not retract`, so they are mutually exclusive by construction and
 can never contradict each other.
 
-Whether *exactly* one of them fires depends on your thresholds. With
-`sun_min_awning` and `sun_min_backup` set to the **same** value, exactly one
-fires whenever it is sunny: calm → extend, windy/wet → backup. If you set them
-**differently**, there are conditions where **neither** fires — for example with
+Whether *exactly* one of them fires depends on your thresholds. Under the
+**irradiance** model they share one threshold (`irradiance_min_shade`), so
+they partition cleanly: exactly one fires whenever it is sunny enough.
+
+Under the **sunshine** model they have separate thresholds, and setting them
+**differently** leaves conditions where **neither** fires — with
 `sun_min_awning: 20` and `sun_min_backup: 30`, a 25 min/h forecast in high wind
-is sunny enough that the awning would want to be out (so it retracts) but not
-sunny enough to close the backup blind, so nothing deploys. That is intended
-behaviour for independent thresholds, not a bug; set `sun_min_backup` at or
-below `sun_min_awning` if you always want the backup to take over.
+is sunny enough that the awning stays in but not enough to close the backup,
+so nothing deploys. That is intended for independent thresholds, not a bug; set
+`sun_min_backup` at or below `sun_min_awning` if you always want the backup to
+take over.
 `retract` (= `wind_high OR rain OR all-gust-sources-failed`) is the safety
 override. It is part of the published state JSON but has no entity of its own —
 `Shade recommendation` already distinguishes all three outcomes, and `Wind high`
@@ -138,9 +147,10 @@ minimum elevation = atan( H / P )      H = awning height above the sill
 | 2.0 m high, 4.0 m out | 27° |
 
 Measure yours and set the option; the default is 35°. Below it the awning
-stays in even in blazing sun, which is correct — it could not have helped.
-Blinds have no such gate: they block sun at any height, which is precisely why
-they are the tool for a low evening sun.
+stays in even in blazing sun — and the **backup blind closes instead**, because
+it covers the same opening and works at any sun height. That is precisely why
+a blind is the right tool for a low evening sun, and why the awning and the
+backup share one threshold: same window, same need, different device.
 
 > **What the number means.** The surface is assumed to always face the sun, so
 > the figure is an **upper bound** — a real facade with a fixed orientation
@@ -289,8 +299,7 @@ Open the app's **Configuration** tab:
 | `sun_min_awning` | *(sunshine model)* minutes of sun per hour before the **awning** extends | `20` |
 | `sun_min_backup` | *(sunshine model)* minutes of sun per hour before the **backup blind** closes | `20` |
 | `sun_min_independent` | *(sunshine model)* minutes of sun per hour before the **independent blinds** close | `20` |
-| `irradiance_min_awning` | *(irradiance model)* W/m² on the **window** before the **awning** extends | `250` |
-| `irradiance_min_backup` | *(irradiance model)* W/m² on the window before the **backup blind** closes | `250` |
+| `irradiance_min_shade` | *(irradiance model)* W/m² on the **window** before the opening gets shaded (awning or backup) | `250` |
 | `irradiance_min_independent` | *(irradiance model)* W/m² on the window before the **independent blinds** close | `250` |
 | `awning_min_elevation` | *(irradiance model)* don't extend the awning below this sun height (°) | `35` |
 | `albedo` | *(irradiance model)* ground reflectance, 0–0.9 | `0.20` |

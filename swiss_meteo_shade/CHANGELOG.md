@@ -14,8 +14,8 @@ alter how your covers move is called out explicitly.
   unchanged. The new `irradiance` model computes the solar power actually
   arriving on the surface in W/m², from the MeteoSwiss global and diffuse
   radiation forecast, and compares it against `irradiance_min_awning` /
-  `_backup` / `_independent` (default 250 W/m² — expect to tune this, as with
-  `gust_limit_kmh`).
+  `irradiance_min_shade` and `irradiance_min_independent` (default 250 W/m² —
+  expect to tune this, as with `gust_limit_kmh`).
 
   It captures three things minutes-of-sunshine cannot: intensity (overcast
   ~100–200 W/m², clear sun 700–1000), diffuse light on an overcast day, and
@@ -23,6 +23,10 @@ alter how your covers move is called out explicitly.
   885 W/m² on the window at 10° of elevation against 529 at 65°. All three
   outputs are judged on the window plane, because what matters is sun
   entering the room, not sun landing on a shading device.
+- The backup blind now also takes over when the awning is **ineffective**, not
+  only when it is unsafe. Previously it was tied to wind and rain alone, so a
+  bright low evening sun left the awning correctly in and the blind pointlessly
+  up, with the opening unshaded. Unchanged under the sunshine model.
 - `awning_min_elevation` — an awning only shades while the sun is high enough;
   below that the beam passes underneath it. Compute yours as `atan(H / P)`
   where H is the height above the sill and P the projection (2.5 m high and

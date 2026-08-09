@@ -38,12 +38,9 @@ configuration:
   sun_min_independent:
     name: Independent-blind sunshine threshold (min/hour)
     description: "Sunshine threshold for the independent blinds, which have no wind or rain vulnerability. Often set lower than the awning (e.g. 5-10) so interior glare/heat blinds come down even in weaker sun. 20 default."
-  irradiance_min_awning:
-    name: Awning irradiance threshold (W/m2)
-    description: "Only used when Sun model is 'irradiance'. Solar power on the WINDOW (vertical) at or above which the awning extends - what matters is sun entering the room, not sun landing on the awning fabric. For scale: overcast is roughly 100-200, hazy sun 300-500, full clear sun 700-1000. 250 is a starting point and wants tuning against how your terrace actually feels."
-  irradiance_min_backup:
-    name: Backup-blind irradiance threshold (W/m2)
-    description: "Only used when Sun model is 'irradiance'. Threshold for the backup blind, judged on the same window plane. Independent of the awning threshold."
+  irradiance_min_shade:
+    name: Shade irradiance threshold (W/m2)
+    description: "Only used when Sun model is 'irradiance'. Solar power arriving on the WINDOW at or above which the opening gets shaded - by the awning when the sun is high enough for it to help, otherwise by the backup blind. What matters is sun entering the room, not sun landing on the awning fabric. For scale: overcast is roughly 100-200, hazy sun 300-500, full clear sun 700-1000. 250 is a starting point and wants tuning against how the room actually feels."
   irradiance_min_independent:
     name: Independent-blind irradiance threshold (W/m2)
     description: "Only used when Sun model is 'irradiance'. Threshold for the independent blinds, judged on the same window plane. Often set lower than the awning so interior glare blinds come down in weaker sun."

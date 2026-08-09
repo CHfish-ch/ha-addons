@@ -139,10 +139,8 @@ def apply_options(opts):
                                                60, int, "forecast_max_cache_minutes")
     shade.SUN_MODEL = _choice(g("sun_model"), "sunshine", shade.SUN_MODELS,
                               "sun_model")
-    shade.IRRADIANCE_MIN_AWNING = _num(g("irradiance_min_awning"), 250, int,
-                                       "irradiance_min_awning")
-    shade.IRRADIANCE_MIN_BACKUP = _num(g("irradiance_min_backup"), 250, int,
-                                       "irradiance_min_backup")
+    shade.IRRADIANCE_MIN_SHADE = _num(g("irradiance_min_shade"), 250, int,
+                                      "irradiance_min_shade")
     shade.IRRADIANCE_MIN_INDEPENDENT = _num(g("irradiance_min_independent"),
                                             250, int,
                                             "irradiance_min_independent")
