@@ -62,20 +62,13 @@ From those:
 And the outputs:
 
 ```
-sun           = sun signal passes AND temperature gate passes
-retract       = wind_high OR rain OR (all gust sources failed)
-awning_usable = NOT retract AND awning can physically shade
+sun       = sun signal passes AND temperature gate passes
+retract   = wind_high OR rain OR (all gust sources failed)
 
-awning_extend            = sun AND awning_usable
-backup_blinds_close      = sun AND NOT awning_usable
+awning_extend            = sun AND NOT retract
+backup_blinds_close      = sun AND retract
 independent_blinds_close = sun
 ```
-
-There are **two** reasons the awning can't do the job, and the backup blind
-covers both: it is *unsafe* (wind, rain, or no gust reading at all), or it is
-*ineffective* — the sun is too low and the beam passes underneath it. The
-second only arises under the irradiance model, which knows the sun's height;
-the sunshine model has no geometry and always treats the awning as effective.
 
 Where `wind_high` uses hysteresis around `gust_limit_kmh` / `gust_release_kmh`,
 and the temperature gate (`min_temp_c`) — if set — blocks *all* shade below the
@@ -113,7 +106,8 @@ vertical blind versus a sloped awning.
 
 **`irradiance`.** Computes the solar power arriving on the surface in **W/m²**,
 from the MeteoSwiss global and diffuse radiation forecast, and compares it
-against `irradiance_min_awning` / `_backup` / `_independent`. It captures three
+against `irradiance_min_shade` and `irradiance_min_independent`. It captures
+three
 things the minutes model cannot:
 
 - **Intensity.** Overcast is roughly 100–200 W/m², hazy sun 300–500, full clear
@@ -129,28 +123,25 @@ things the minutes model cannot:
 All three outputs are judged on the **window** plane (vertical), because what
 matters is sun entering the room — not sun landing on a shading device.
 
-**`awning_min_elevation` — why the awning alone needs a second condition.**
-An awning is a horizontal projection above the window, so it only shades while
-the sun is high enough; below that the beam simply passes underneath and the
-awning shades nothing. That limit is pure geometry:
+The awning and the backup blind cover the same opening, so under this model
+they share one threshold (`irradiance_min_shade`); the independent blinds keep
+their own, since they are usually different windows and often wanted in weaker
+sun.
 
-```
-minimum elevation = atan( H / P )      H = awning height above the sill
-                                       P = how far it projects
-```
+**Where the awning stops helping — and why this is not an option.** As the sun
+drops, an awning's shadow line climbs the wall and it covers less of the
+window, from the bottom up. It is tempting to gate on that, but the geometry
+says otherwise: a pitched awning's fabric hangs *below* the window head, so it
+still shades something at any sun height, and the gate would never fire. Only a
+**flat** awning or a fixed canopy sits high enough for it to bite. If that is
+your case, put the condition in your automation next to the azimuth gate, using
+`sun.sun`'s `elevation`.
 
-| Awning | needs |
-| --- | --- |
-| 2.5 m high, 2.0 m out | 51° |
-| 2.5 m high, 3.0 m out | 40° |
-| 2.2 m high, 3.5 m out | 32° |
-| 2.0 m high, 4.0 m out | 27° |
-
-Measure yours and set the option; the default is 35°. Below it the awning
-stays in even in blazing sun — and the **backup blind closes instead**, because
-it covers the same opening and works at any sun height. That is precisely why
-a blind is the right tool for a low evening sun, and why the awning and the
-backup share one threshold: same window, same need, different device.
+> To work out the angles for your own installation — including an awning set
+> back under a balcony — open
+> [`docs/awning-geometry.html`](../docs/awning-geometry.html) in a browser. It
+> is self-contained and needs no network, and it also shows whether the sun at
+> 47°N ever reaches that height in winter.
 
 > **What the number means.** The surface is assumed to always face the sun, so
 > the figure is an **upper bound** — a real facade with a fixed orientation
@@ -301,7 +292,6 @@ Open the app's **Configuration** tab:
 | `sun_min_independent` | *(sunshine model)* minutes of sun per hour before the **independent blinds** close | `20` |
 | `irradiance_min_shade` | *(irradiance model)* W/m² on the **window** before the opening gets shaded (awning or backup) | `250` |
 | `irradiance_min_independent` | *(irradiance model)* W/m² on the window before the **independent blinds** close | `250` |
-| `awning_min_elevation` | *(irradiance model)* don't extend the awning below this sun height (°) | `35` |
 | `albedo` | *(irradiance model)* ground reflectance, 0–0.9 | `0.20` |
 | `min_solar_elevation` | *(irradiance model)* ignore the direct beam below this sun height (°) | `3.0` |
 | `irradiance_substeps` | *(irradiance model)* sun-path samples per hour | `12` |

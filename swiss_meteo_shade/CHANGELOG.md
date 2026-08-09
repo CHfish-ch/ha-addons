@@ -5,6 +5,33 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.5.1 - 2026-08-10
+
+### Changed
+
+- **Removed `awning_min_elevation`.** It gated the awning on the sun being
+  high enough to shade the window, but the geometry says otherwise: a pitched
+  awning's fabric hangs *below* the window head, so it always covers something
+  and the gate computed to 0° — dead config for every retractable awning. Only
+  a flat awning or fixed canopy sits high enough for it to matter, and that
+  belongs in an automation condition on `sun.sun`, alongside the azimuth gate.
+  The decision reverts to `awning_extend = sun AND NOT retract`.
+- `min_solar_elevation` is documented accurately. It was described as a
+  numerical floor below which refraction makes the angle unreliable; measuring
+  against real forecast data shows that never bites — below ~2° of elevation
+  MeteoSwiss already reports the radiation as 90–100% diffuse, so the direct
+  beam is essentially zero and the setting cannot change a decision there. It
+  is a **site horizon** control: raise it if a treeline, buildings or a slope
+  block your low sun, and leave it at 0 if your horizon is clear.
+
+### Added
+
+- `docs/awning-geometry.html` — a self-contained interactive cross-section
+  showing how much of a window an awning covers at a given sun elevation,
+  including an awning set back under a balcony. Useful for writing that
+  automation condition, and for seeing whether the sun at 47°N ever gets high
+  enough in winter.
+
 ## 1.5.0 - 2026-08-09
 
 ### Added
@@ -13,9 +40,9 @@ alter how your covers move is called out explicitly.
   `sunshine` model (minutes of sun per hour) stays the default and is
   unchanged. The new `irradiance` model computes the solar power actually
   arriving on the surface in W/m², from the MeteoSwiss global and diffuse
-  radiation forecast, and compares it against `irradiance_min_awning` /
-  `irradiance_min_shade` and `irradiance_min_independent` (default 250 W/m² —
-  expect to tune this, as with `gust_limit_kmh`).
+  radiation forecast, and compares it against `irradiance_min_shade` and
+  `irradiance_min_independent` (default 250 W/m² — expect to tune this, as
+  with `gust_limit_kmh`).
 
   It captures three things minutes-of-sunshine cannot: intensity (overcast
   ~100–200 W/m², clear sun 700–1000), diffuse light on an overcast day, and
@@ -65,12 +92,10 @@ alter how your covers move is called out explicitly.
   `Warning` event entity fires. The `Irradiance` sensors go Unknown rather
   than holding a stale figure. If sunshine is missing too, the sun is
   genuinely unknown and the shade is kept in.
-- **If you briefly ran the 1.4.0 that was published earlier today**, three of
-  its options were renamed before release: `awning_tilt` became
-  `awning_min_elevation` (an awning's limit is the sun's height, not its own
-  pitch), and `irradiance_min_awning` / `irradiance_min_backup` merged into
-  `irradiance_min_shade` (they shade the same opening). Check the
-  Configuration tab after updating; the old keys are not carried over.
+- **Coming from a pre-1.5.0 build?** Several irradiance options were renamed
+  or merged during development and are not carried over. Check the
+  Configuration tab after updating rather than assuming your old values
+  survived.
 - The irradiance figure assumes the surface faces the sun, making it an upper
   bound that holds for every window on the building. *Which* window the sun is
   actually on remains a question for your automation — see the sun-position

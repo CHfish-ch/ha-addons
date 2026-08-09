@@ -1,0 +1,441 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<meta name="description" content="Awning shading geometry for Swiss Meteo Shade: how much of a window an awning covers at a given sun elevation.">
+<style>
+  /* minimal reset -- the hosted viewer supplies one, a standalone file needs it */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  img, svg { max-width: 100%; }
+  button, input { font: inherit; color: inherit; }
+</style>
+<title>Awning shading geometry — what minimum sun elevation to enter</title>
+<style>
+  :root {
+    --paper:      #FBF9F5;
+    --paper-sunk: #F2EEE5;
+    --ink:        #1E2329;
+    --ink-soft:   #6B6559;
+    --hair:       #D9D3C7;
+    --sun:        #E0912A;
+    --sun-wash:   rgba(224,145,42,.14);
+    --shade:      #41627E;
+    --shade-wash: rgba(65,98,126,.16);
+    --glass:      #9FB6C4;
+    --solid:      #C9C2B4;
+    --focus:      #2C6E9B;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --paper:      #15181D;
+      --paper-sunk: #1D2127;
+      --ink:        #E8E4DB;
+      --ink-soft:   #9A9388;
+      --hair:       #33383F;
+      --sun:        #F0A94A;
+      --sun-wash:   rgba(240,169,74,.16);
+      --shade:      #6D9AC0;
+      --shade-wash: rgba(109,154,192,.20);
+      --glass:      #4A6272;
+      --solid:      #3A3F47;
+      --focus:      #6DA9D6;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#15181D; --paper-sunk:#1D2127; --ink:#E8E4DB; --ink-soft:#9A9388;
+    --hair:#33383F; --sun:#F0A94A; --sun-wash:rgba(240,169,74,.16);
+    --shade:#6D9AC0; --shade-wash:rgba(109,154,192,.20);
+    --glass:#4A6272; --solid:#3A3F47; --focus:#6DA9D6;
+  }
+  :root[data-theme="light"] {
+    --paper:#FBF9F5; --paper-sunk:#F2EEE5; --ink:#1E2329; --ink-soft:#6B6559;
+    --hair:#D9D3C7; --sun:#E0912A; --sun-wash:rgba(224,145,42,.14);
+    --shade:#41627E; --shade-wash:rgba(65,98,126,.16);
+    --glass:#9FB6C4; --solid:#C9C2B4; --focus:#2C6E9B;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--paper); color: var(--ink);
+    font: 15px/1.6 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 40px 24px 72px; }
+
+  .eyebrow {
+    font: 600 11px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--ink-soft);
+  }
+  h1 {
+    font-size: clamp(26px, 3.4vw, 38px); line-height: 1.12; margin: 14px 0 10px;
+    letter-spacing: -.02em; text-wrap: balance; font-weight: 650;
+  }
+  .lede { max-width: 62ch; color: var(--ink-soft); margin: 0 0 32px; }
+  .lede strong { color: var(--ink); font-weight: 600; }
+
+  .stage { display: grid; grid-template-columns: 1fr 300px; gap: 26px; align-items: start; }
+  @media (max-width: 900px) { .stage { grid-template-columns: 1fr; } }
+
+  .drawing {
+    background: var(--paper-sunk); border: 1px solid var(--hair);
+    border-radius: 3px; overflow: hidden;
+  }
+  .drawing svg { display: block; width: 100%; height: auto; }
+
+  .panel { display: flex; flex-direction: column; gap: 20px; }
+  fieldset { border: 1px solid var(--hair); border-radius: 3px; padding: 16px 14px 14px; margin: 0; }
+  legend {
+    font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: .16em; text-transform: uppercase; color: var(--ink-soft);
+    padding: 0 6px;
+  }
+  .ctl { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; margin-bottom: 13px; }
+  .ctl:last-child { margin-bottom: 0; }
+  .ctl label { font-size: 12.5px; color: var(--ink-soft); }
+  .ctl output {
+    font: 600 12.5px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums; color: var(--ink);
+  }
+  .ctl input[type=range] { grid-column: 1 / -1; width: 100%; accent-color: var(--focus); margin: 3px 0 0; }
+  .ctl input:focus-visible { outline: 2px solid var(--focus); outline-offset: 3px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(215px, 1fr)); gap: 14px; margin-top: 26px; }
+  .card { border: 1px solid var(--hair); border-radius: 3px; padding: 15px 16px 16px; background: var(--paper-sunk); }
+  .card.key { border-color: var(--sun); background: var(--sun-wash); }
+  .card h3 {
+    font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    letter-spacing: .15em; text-transform: uppercase; color: var(--ink-soft);
+    margin: 0 0 9px;
+  }
+  .card .big {
+    font: 650 30px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+  }
+  .card p { margin: 8px 0 0; font-size: 12.5px; color: var(--ink-soft); line-height: 1.5; }
+
+  .season { margin-top: 30px; border: 1px solid var(--hair); border-radius: 3px; padding: 18px; }
+  .season h2 { font-size: 15px; margin: 0 0 4px; font-weight: 650; }
+  .season .sub { font-size: 12.5px; color: var(--ink-soft); margin: 0 0 16px; }
+  .bar { position: relative; height: 46px; border-radius: 2px; overflow: hidden;
+         background: linear-gradient(90deg, var(--shade-wash), var(--sun-wash)); border: 1px solid var(--hair); }
+  .bar .need { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--sun); }
+  .bar .tick { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--hair); }
+  .bar .lbl {
+    position: absolute; bottom: 4px; transform: translateX(-50%);
+    font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-soft);
+    white-space: nowrap;
+  }
+  .verdict { margin-top: 14px; font-size: 13.5px; }
+  .verdict b { font-weight: 650; }
+
+  table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 13px; }
+  th, td { text-align: left; padding: 7px 10px 7px 0; border-bottom: 1px solid var(--hair); }
+  th { font: 600 10px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+       letter-spacing: .13em; text-transform: uppercase; color: var(--ink-soft); }
+  td.num { font: 500 13px/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+           font-variant-numeric: tabular-nums; text-align: right; padding-right: 0; }
+  .scroll { overflow-x: auto; }
+
+  footer { margin-top: 40px; padding-top: 18px; border-top: 1px solid var(--hair);
+           font-size: 12.5px; color: var(--ink-soft); }
+  code { font: 500 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+         background: var(--paper-sunk); padding: 1px 5px; border-radius: 2px; border: 1px solid var(--hair); }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+
+<div class="wrap">
+  <div class="eyebrow">Swiss Meteo Shade · section study</div>
+  <h1>What sun elevation does your awning actually need?</h1>
+  <p class="lede">
+    As the sun drops, an awning's shadow line climbs the wall and it covers
+    less and less of the window — from the bottom up. Set your own measurements
+    below to see where yours stands. On most awnings the fabric hangs
+    <strong>below the window head</strong>, so it shades something at every sun
+    height and never needs gating; that is why the add-on has no option for
+    this. A <strong>flat</strong> awning or fixed canopy sits high enough that
+    it genuinely stops helping, and the first figure below is the condition to
+    put in your automation.
+  </p>
+
+  <div class="stage">
+    <div class="drawing">
+      <svg id="fig" viewBox="0 0 760 520" role="img"
+           aria-label="Cross-section of a wall, window, balcony and awning, showing the sun ray that grazes the awning edge and the shadow it casts on the wall."></svg>
+    </div>
+
+    <div class="panel">
+      <fieldset>
+        <legend>Window</legend>
+        <div class="ctl">
+          <label for="wb">Sill above floor</label><output id="wb-o"></output>
+          <input type="range" id="wb" min="0" max="2" step="0.05" value="0.45">
+        </div>
+        <div class="ctl">
+          <label for="wt">Head above floor</label><output id="wt-o"></output>
+          <input type="range" id="wt" min="0.5" max="3.2" step="0.05" value="2.00">
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Awning</legend>
+        <div class="ctl">
+          <label for="ah">Mount above floor</label><output id="ah-o"></output>
+          <input type="range" id="ah" min="1.5" max="5" step="0.05" value="2.45">
+        </div>
+        <div class="ctl">
+          <label for="d">Set back from wall</label><output id="d-o"></output>
+          <input type="range" id="d" min="0" max="4" step="0.05" value="1.25">
+        </div>
+        <div class="ctl">
+          <label for="len">Fabric length</label><output id="len-o"></output>
+          <input type="range" id="len" min="0.5" max="5" step="0.05" value="1.80">
+        </div>
+        <div class="ctl">
+          <label for="pitch">Pitch below horizontal</label><output id="pitch-o"></output>
+          <input type="range" id="pitch" min="0" max="90" step="1" value="45">
+        </div>
+      </fieldset>
+
+      <fieldset>
+        <legend>Sun — drag to explore</legend>
+        <div class="ctl">
+          <label for="sun">Solar elevation</label><output id="sun-o"></output>
+          <input type="range" id="sun" min="0" max="70" step="0.5" value="17">
+        </div>
+      </fieldset>
+    </div>
+  </div>
+
+  <div class="cards">
+    <div class="card">
+      <h3>Shades nothing below</h3>
+      <div class="big" id="r-top">—</div>
+      <p>The shadow has risen clear above the window head. Reads
+         <strong>any</strong> for a pitched awning, which always covers
+         something — nothing to gate on.</p>
+    </div>
+    <div class="card key">
+      <h3>Whole window covered</h3>
+      <div class="big" id="r-full">—</div>
+      <p>Above this the awning shades the opening completely. Between the two
+         figures it covers the upper part — partial shade, still better than
+         retracting.</p>
+    </div>
+    <div class="card">
+      <h3>Balcony alone, awning in</h3>
+      <div class="big" id="r-balc">—</div>
+      <p>What the structure above already covers without extending anything.
+         Above this the awning adds nothing.</p>
+    </div>
+  </div>
+
+  <div class="season">
+    <h2>Is the sun ever that high here?</h2>
+    <p class="sub">Peak solar elevation at 47°N — Lucerne, Bern, Zürich are all within a degree.</p>
+    <div class="bar" id="bar"></div>
+    <p class="verdict" id="verdict"></p>
+
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr><th>Date</th><th>Peak elevation</th><th style="text-align:right">At midday the awning…</th></tr>
+        </thead>
+        <tbody id="seasons"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <footer>
+    Side elevation, drawn to scale. The sun is treated as square-on to the facade —
+    at an oblique angle the shadow shifts sideways and covers less, so the figures
+    here are the best case. Solar elevations from the standard declination model at
+    47°N.
+  </footer>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+const ids = ["wb","wt","ah","d","len","pitch","sun"];
+const fmt = (v,u) => v.toFixed(u === "°" ? 0 : 2) + " " + u;
+const DEG = Math.PI / 180;
+
+// Peak solar elevation at latitude L on a given declination: 90 - L + dec
+const LAT = 47.05;
+const peak = dec => 90 - LAT + dec;
+const SEASONS = [
+  ["21 Jun — solstice",  23.44],
+  ["21 May / 23 Jul",    20.1],
+  ["21 Apr / 23 Aug",    11.6],
+  ["20 Mar / 23 Sep",     0.0],
+  ["21 Feb / 23 Oct",   -11.2],
+  ["21 Jan / 22 Nov",   -19.9],
+  ["21 Dec — solstice", -23.44],
+];
+
+function geometry(v) {
+  // Wall at x=0, outward positive. Awning mount set back by d at height ah,
+  // fabric running out and down at `pitch` for `len`.
+  const xe = v.d + v.len * Math.cos(v.pitch * DEG);
+  const ye = v.ah - v.len * Math.sin(v.pitch * DEG);
+  // A ray grazing an edge at (x,y) meets the wall at y - x*tan(h).
+  const angleFor = target => {
+    const rise = ye - target;
+    return rise <= 0 ? 0 : Math.atan(rise / xe) / DEG;
+  };
+  return {
+    xe, ye,
+    full: angleFor(v.wb),                       // whole window covered
+    top:  angleFor(v.wt),                       // head of window covered
+    balcony: v.d > 0 && v.ah > v.wb ? Math.atan((v.ah - v.wb) / v.d) / DEG : 0,
+    shadowAt: h => ye - xe * Math.tan(h * DEG), // shadow line on the wall
+  };
+}
+
+function draw(v, g) {
+  const W = 760, H = 520, pad = { l: 96, r: 34, t: 26, b: 62 };
+  // metre -> pixel, y up
+  const xMax = Math.max(6.2, g.xe + 1.6), yMax = Math.max(5.2, v.ah + 1.2);
+  const s = Math.min((W - pad.l - pad.r) / xMax, (H - pad.t - pad.b) / yMax);
+  const X = m => pad.l + m * s, Y = m => H - pad.b - m * s;
+
+  const shadowY = g.shadowAt(v.sun);
+  const lit = Math.max(v.wb, Math.min(v.wt, shadowY));   // sunlit band on glass
+  const rayEndX = g.xe + 1.7, rayEndY = g.ye + 1.7 * Math.tan(v.sun * DEG);
+
+  const p = [];
+  const line = (x1,y1,x2,y2,st) => p.push(`<line x1="${X(x1)}" y1="${Y(y1)}" x2="${X(x2)}" y2="${Y(y2)}" ${st}/>`);
+  const txt  = (x,y,t,st="") => p.push(`<text x="${x}" y="${y}" ${st}>${t}</text>`);
+
+  const MONO = `font-family="ui-monospace, SFMono-Regular, Menlo, monospace"`;
+
+  // ground hatching
+  p.push(`<line x1="${X(-0.7)}" y1="${Y(0)}" x2="${X(xMax)}" y2="${Y(0)}" stroke="var(--ink)" stroke-width="1.6"/>`);
+  for (let x = -0.6; x < xMax; x += 0.34) {
+    p.push(`<line x1="${X(x)}" y1="${Y(0)}" x2="${X(x - 0.22)}" y2="${Y(0) + 11}" stroke="var(--hair)" stroke-width="1"/>`);
+  }
+
+  // wall (solid poche) + balcony slab
+  p.push(`<rect x="${X(-0.62)}" y="${Y(yMax)}" width="${0.62 * s}" height="${Y(0) - Y(yMax)}"
+           fill="var(--solid)" stroke="var(--ink)" stroke-width="1.2"/>`);
+  if (v.d > 0.05) {
+    p.push(`<rect x="${X(0)}" y="${Y(v.ah + 0.19)}" width="${v.d * s}" height="${0.19 * s}"
+             fill="var(--solid)" stroke="var(--ink)" stroke-width="1.2"/>`);
+    txt(X(v.d / 2), Y(v.ah + 0.19) - 7, "balcony over", `${MONO} font-size="10.5" fill="var(--ink-soft)" text-anchor="middle" letter-spacing="1"`);
+  }
+
+  // window: shaded portion then sunlit portion
+  p.push(`<rect x="${X(-0.09)}" y="${Y(v.wt)}" width="${0.09 * s}" height="${(v.wt - v.wb) * s}"
+           fill="var(--glass)" stroke="var(--ink)" stroke-width="1.3"/>`);
+  if (lit > v.wb) {
+    p.push(`<rect x="${X(-0.09)}" y="${Y(lit)}" width="${0.09 * s}" height="${(lit - v.wb) * s}"
+             fill="var(--sun)" opacity=".62"/>`);
+  }
+
+  // awning fabric
+  p.push(`<line x1="${X(v.d)}" y1="${Y(v.ah)}" x2="${X(g.xe)}" y2="${Y(g.ye)}"
+           stroke="var(--ink)" stroke-width="4.5" stroke-linecap="round"/>`);
+  p.push(`<circle cx="${X(v.d)}" cy="${Y(v.ah)}" r="3.6" fill="var(--ink)"/>`);
+
+  // sun ray grazing the awning edge, continuing to the wall
+  p.push(`<line x1="${X(rayEndX)}" y1="${Y(rayEndY)}" x2="${X(0)}" y2="${Y(shadowY)}"
+           stroke="var(--sun)" stroke-width="2" stroke-dasharray="7 4"/>`);
+  p.push(`<circle cx="${X(g.xe)}" cy="${Y(g.ye)}" r="4" fill="var(--sun)"/>`);
+
+  // shadow line on the wall
+  if (shadowY > 0 && shadowY < yMax) {
+    line(-0.62, shadowY, g.xe + 0.4, shadowY, `stroke="var(--shade)" stroke-width="1" stroke-dasharray="3 3" opacity=".85"`);
+    txt(X(g.xe + 0.45), Y(shadowY) + 3.5, `shadow ${shadowY.toFixed(2)} m`,
+        `${MONO} font-size="10.5" fill="var(--shade)"`);
+  }
+
+  // dimension: sill + head
+  [[v.wb, "sill"], [v.wt, "head"]].forEach(([m, l]) => {
+    line(-0.62, m, -1.05, m, `stroke="var(--ink-soft)" stroke-width="1"`);
+    txt(X(-1.12), Y(m) + 3.5, `${l} ${m.toFixed(2)}`,
+        `${MONO} font-size="10.5" fill="var(--ink-soft)" text-anchor="end"`);
+  });
+  line(-1.05, v.wb, -1.05, v.wt, `stroke="var(--ink-soft)" stroke-width="1"`);
+
+  // angle annotation at the awning edge
+  txt(X(g.xe) + 9, Y(g.ye) - 9, `${v.sun.toFixed(0)}°`,
+      `${MONO} font-size="13" font-weight="600" fill="var(--sun)"`);
+
+  return `<g>${p.join("")}</g>`;
+}
+
+function render() {
+  const v = {
+    wb: +$("wb").value, wt: +$("wt").value, ah: +$("ah").value,
+    d: +$("d").value, len: +$("len").value, pitch: +$("pitch").value,
+    sun: +$("sun").value,
+  };
+  if (v.wt <= v.wb + 0.15) { v.wt = v.wb + 0.15; $("wt").value = v.wt; }
+
+  $("wb-o").textContent = fmt(v.wb, "m");
+  $("wt-o").textContent = fmt(v.wt, "m");
+  $("ah-o").textContent = fmt(v.ah, "m");
+  $("d-o").textContent  = fmt(v.d, "m");
+  $("len-o").textContent = fmt(v.len, "m");
+  $("pitch-o").textContent = fmt(v.pitch, "°");
+  $("sun-o").textContent = fmt(v.sun, "°");
+
+  const g = geometry(v);
+  $("fig").innerHTML = draw(v, g);
+
+  $("r-full").textContent = g.full <= 0 ? "any" : g.full.toFixed(0) + "°";
+  $("r-top").textContent  = g.top  <= 0 ? "any" : g.top.toFixed(0) + "°";
+  $("r-balc").textContent = g.balcony <= 0 ? "—" : g.balcony.toFixed(0) + "°";
+
+  // seasonal strip
+  const maxDeg = 70;
+  const bar = $("bar");
+  bar.innerHTML = "";
+  [0, 20, 40, 60].forEach(t => {
+    const el = document.createElement("div");
+    el.className = "tick"; el.style.left = (t / maxDeg * 100) + "%";
+    bar.appendChild(el);
+    const lb = document.createElement("div");
+    lb.className = "lbl"; lb.style.left = (t / maxDeg * 100) + "%"; lb.textContent = t + "°";
+    bar.appendChild(lb);
+  });
+  const need = document.createElement("div");
+  need.className = "need";
+  need.style.left = Math.min(100, g.top / maxDeg * 100) + "%";
+  bar.appendChild(need);
+
+  const summerPeak = peak(23.44), winterPeak = peak(-23.44);
+  let verdict;
+  if (g.full <= 0) {
+    verdict = "This awning covers the window at <b>any</b> sun height — the fabric edge already sits below the sill.";
+  } else if (g.full > summerPeak) {
+    verdict = `Full cover would need <b>${g.full.toFixed(0)}°</b>, but the sun never exceeds <b>${summerPeak.toFixed(0)}°</b> here — so this awning only ever shades <i>part</i> of the window. It is still worth extending above <b>${g.top.toFixed(0)}°</b>; the blind handles the rest.`;
+  } else if (g.full > winterPeak) {
+    verdict = `Full cover needs <b>${g.full.toFixed(0)}°</b> — reached in summer, but not in midwinter when the sun peaks at only <b>${winterPeak.toFixed(0)}°</b>. Below that it still shades the upper window down to <b>${g.top.toFixed(0)}°</b>, and the blind takes over beneath.`;
+  } else {
+    verdict = `Full cover needs <b>${g.full.toFixed(0)}°</b>, below the midwinter peak of <b>${winterPeak.toFixed(0)}°</b> — this awning can cover the window year-round around midday.`;
+  }
+  $("verdict").innerHTML = verdict;
+
+  $("seasons").innerHTML = SEASONS.map(([label, dec]) => {
+    const pk = peak(dec);
+    let state, tone;
+    if (g.full <= 0 || pk >= g.full)      { state = "covers it fully";  tone = "var(--sun)"; }
+    else if (pk >= g.top)                 { state = "covers the top";   tone = "var(--sun)"; }
+    else                                  { state = "nothing — blind";  tone = "var(--shade)"; }
+    return `<tr><td>${label}</td><td class="num" style="text-align:left">${pk.toFixed(1)}°</td>` +
+           `<td class="num" style="color:${tone}">${state}</td></tr>`;
+  }).join("");
+}
+
+ids.forEach(id => $(id).addEventListener("input", render));
+render();
+</script>
+
+</body>
+</html>

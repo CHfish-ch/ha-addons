@@ -1,10 +1,10 @@
 """Tests for choosing between the sunshine and irradiance sun models.
 
 Four things must hold and none of them raises an exception when broken: the
-unselected model's data must not be fetched, each output must be judged on the
-tilt that matches what it physically is, a radiation outage must fall back to
-sunshine ANNOUNCED rather than silently, and the fallback must not invent a
-signal when sunshine is missing too.
+unselected model's data must not be fetched, every output must be judged on the
+window plane, a radiation outage must fall back to sunshine ANNOUNCED rather
+than silently, and the fallback must not invent a signal when sunshine is
+missing too.
 """
 import os
 import sys
@@ -27,7 +27,6 @@ def setup_function():
     shade.SUN_MIN_INDEPENDENT = 20
     shade.IRRADIANCE_MIN_SHADE = 250
     shade.IRRADIANCE_MIN_INDEPENDENT = 250
-    shade.AWNING_MIN_ELEVATION = 35
     shade.MIN_TEMP_C = None
     shade.GUST_RELEASE_KMH = None
 
@@ -44,7 +43,8 @@ def setup_function():
 
 
 def _irr(window_total, elevation=50.0):
-    """All outputs read the vertical window plane; elevation gates the awning."""
+    """All outputs read the vertical window plane. `elevation` is carried for
+    the diagnostics sensor only -- nothing in the decision reads it."""
     return {
         90: {"total": window_total, "direct": window_total, "diffuse": 0.0,
              "ground": 0.0, "cos_incidence": 1.0},
@@ -155,44 +155,25 @@ def test_sun_is_still_unknown_when_both_models_have_no_data():
     assert st["awning_extend"] is False
 
 
-def test_low_sun_hands_the_opening_to_the_backup_blind():
-    """Sun entering a room PEAKS at low elevation, and a low beam passes under
-    an awning -- so the blind must take over even though it is calm and dry.
-    Tying the backup to wind/rain alone left the opening unshaded here."""
+def test_low_sun_does_not_block_the_awning():
+    """A geometric "is the awning effective?" gate was tried and removed.
+
+    Every pitched awning's fabric hangs below the window head, so it always
+    shades something and the gate never fired -- it was dead config. Low sun
+    is therefore an ordinary sunny case here; if a flat canopy needs gating,
+    that belongs in the user's automation via sun.sun.
+    """
     shade.SUN_MODEL = "irradiance"
-    shade.AWNING_MIN_ELEVATION = 35
-    _set_irradiance(_irr(800, elevation=12.0))     # bright, but very low sun
+    _set_irradiance(_irr(800, elevation=12.0))     # bright, very low sun
     st = shade.evaluate()
-    assert st["awning_extend"] is False, \
-        "an awning cannot block a 12 degree sun -- it goes underneath"
-    assert st["backup_blinds_close"] is True, \
-        "the blind covers the same opening and works at any sun height"
-    assert st["retract"] is False, "and it is calm and dry -- not a hazard"
-    assert st["recommendation"] == "backup"
+    assert st["awning_extend"] is True, \
+        "low sun must not block the awning -- the gate was removed on purpose"
+    assert st["backup_blinds_close"] is False, "calm and dry: no hazard"
+    assert st["recommendation"] == "extend"
 
 
-def test_high_sun_lets_the_awning_extend():
-    shade.SUN_MODEL = "irradiance"
-    shade.AWNING_MIN_ELEVATION = 35
-    _set_irradiance(_irr(600, elevation=55.0))
-    st = shade.evaluate()
-    assert st["awning_extend"] is True
-
-
-def test_elevation_gate_is_configurable():
-    shade.SUN_MODEL = "irradiance"
-    shade.AWNING_MIN_ELEVATION = 50        # short projection, needs high sun
-    _set_irradiance(_irr(600, elevation=40.0))
-    st = shade.evaluate()
-    assert st["awning_extend"] is False
-    assert st["backup_blinds_close"] is True
-    shade.AWNING_MIN_ELEVATION = 27        # deep projection, works lower
-    st = shade.evaluate()
-    assert st["awning_extend"] is True
-
-
-def test_elevation_gate_never_invents_a_known_value():
-    """Gating may turn a True into False, never an unknown into False."""
+def test_radiation_outage_still_falls_back():
+    """Unknown radiation must reach the sunshine model, not become False."""
     shade.SUN_MODEL = "irradiance"
     _set_irradiance(None)                  # radiation unavailable -> fallback
     st = shade.evaluate()

@@ -11,7 +11,7 @@ correct.
 <repo root>/                  = https://github.com/CHfish-ch/ha-addons (public)
 ├── repository.yaml          name/url/maintainer shown in the Add-on Store
 ├── swiss_meteo_shade/       THE ADD-ON — one top-level folder per add-on in this repo
-│   ├── config.yaml          manifest, 24 options
+│   ├── config.yaml          manifest, 23 options
 │   ├── Dockerfile           COPY paths are relative to this dir; no change needed
 │   ├── run.py               entrypoint
 │   ├── shade.py             orchestrator + MQTT discovery
@@ -65,7 +65,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.5.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.5.1. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -305,23 +305,26 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   entering a room peaks at LOW elevation (885 W/m2 vertical at 10 deg vs 529
   at 65), while a 45 deg surface peaks near 50. An awning is a shading device,
   not a collector; what lands on the fabric is irrelevant.
-  The awning's real constraint is geometric and separate: it shades only while
-  `elevation >= atan(H / P)` (height above sill / projection), typically
-  27-51 deg. That is `AWNING_MIN_ELEVATION`.
-  **There are TWO reasons the awning cannot do the job, and the backup blind
-  covers both**: UNSAFE (`retract` -- wind/rain/no gust) and INEFFECTIVE (sun
-  too low). `logic.decide` takes `awning_effective` and computes
-  `awning_usable = not retract and awning_effective`; extend and backup then
-  partition on it. Tying backup to `retract` alone left a bright low evening
-  sun with the awning correctly in and the blind pointlessly up -- the opening
-  unshaded while the independent blinds closed. `awning_effective` defaults
-  True so the sunshine model, which has no geometry, is bit-for-bit unchanged
-  (its 25 tests passed untouched).
-  Because awning and backup are now a strict partition of ONE decision on the
-  SAME opening, they share `IRRADIANCE_MIN_SHADE`. Only the independent blinds
-  keep a separate threshold -- different windows, often wanted in weaker sun.
-  Do not re-split the shared threshold: unequal values reopen the
-  "neither fires" gap for no gain.
+  **A geometric "can the awning even shade?" gate was built and then removed
+  (1.5.1) -- do not rebuild it.** The idea was sound (an awning only shades
+  while the sun clears its outer edge) but it never fires in practice: a
+  pitched awning's fabric hangs BELOW the window head, so it always covers
+  something and `atan((edge_height - head) / edge_distance)` comes out <= 0.
+  Measured across real installations, only a FLAT awning or fixed canopy sits
+  high enough (12-31 deg). It was dead config plus an `awning_effective`
+  parameter, an `awning_usable` term and an extra reason branch. Anyone with a
+  flat canopy should put the condition in their automation on `sun.sun`
+  elevation, next to the azimuth gate. `docs/awning-geometry.html` computes
+  the angles interactively, including a set-back awning under a balcony.
+  Awning and backup remain a strict partition on `retract`, so they still
+  share `IRRADIANCE_MIN_SHADE`; only the independent blinds keep a separate
+  threshold. Do not re-split it -- unequal values reopen the "neither fires"
+  gap for no gain.
+  `min_solar_elevation` is a SITE HORIZON control, not a numerical floor. The
+  "below 3 deg refraction makes it unreliable" claim was wrong: real
+  MeteoSwiss data below ~2 deg elevation is 90-100% diffuse, so the beam is
+  already zero and the setting cannot change a decision there (Lucerne 05:00,
+  GHI 13 / DHI 12 -> 34 W/m2 on the window). 0 is safe with a clear horizon.
   **The irradiance figure is an UPPER BOUND** -- the surface is assumed to face
   the sun, so azimuth cancels out of the geometry. That is what keeps one
   number valid for every window; which window the sun is on stays an
@@ -440,7 +443,7 @@ config changes came out of the investigation:
 - 27 MQTT entities. Operational: recommendation, the three shade decisions, and
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
-- 24 config options, all documented in `README.md` **and** `translations/en.yaml`.
+- 23 config options, all documented in `README.md` **and** `translations/en.yaml`.
 - Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 4 options + 5 forecast + 9 device-link, all passing; no external deps beyond
   numpy for the radar ones.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab

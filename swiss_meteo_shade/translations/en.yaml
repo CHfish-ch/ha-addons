@@ -44,15 +44,12 @@ configuration:
   irradiance_min_independent:
     name: Independent-blind irradiance threshold (W/m2)
     description: "Only used when Sun model is 'irradiance'. Threshold for the independent blinds, judged on the same window plane. Often set lower than the awning so interior glare blinds come down in weaker sun."
-  awning_min_elevation:
-    name: Awning minimum sun elevation (degrees)
-    description: "Only used when Sun model is 'irradiance'. Below this sun height the awning does not extend, because the beam passes underneath it and the awning would shade nothing. Compute yours as atan(H / P) in degrees, where H is the awning's height above the window sill and P is how far it projects: 2.5 m high and 3 m out gives 40; 2 m high and 4 m out gives 27. Blinds are not gated - they block sun at any height."
   albedo:
     name: Ground albedo
     description: "Only used when Sun model is 'irradiance'. How much light the ground reflects back onto a vertical surface, which sees as much ground as sky. Fresh snow 0.75, old snow 0.45, gravel or concrete terrace 0.30, grass 0.20, dark asphalt 0.10. Over snow this alone can add 200 W/m2 to a blind."
   min_solar_elevation:
     name: Minimum solar elevation (degrees)
-    description: "Only used when Sun model is 'irradiance'. Below this sun height the direct beam is ignored. 3 is the numerical floor - lower than that, refraction makes the angle unreliable. Raise it to match your real horizon if buildings, trees or a slope block the low sun (typically 5-15)."
+    description: "Only used when Sun model is 'irradiance'. Below this sun height the direct beam is ignored. This is a SITE HORIZON setting: raise it to match whatever actually blocks your low sun - a treeline, neighbouring buildings, a slope - typically 5 to 15. With a clear horizon, 0 is perfectly safe and is the right choice: near the horizon MeteoSwiss already reports the radiation as 90-100% diffuse, so the direct beam is essentially zero anyway and the setting changes nothing."
   irradiance_substeps:
     name: Irradiance sub-steps per hour
     description: "Only used when Sun model is 'irradiance'. How finely the sun's path is sampled within each forecast hour. 12 (every 5 minutes) is ample; raising it costs nothing but changes almost nothing. Rarely worth touching."
