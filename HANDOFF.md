@@ -65,7 +65,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.4.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.5.0. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:

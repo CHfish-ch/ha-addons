@@ -5,7 +5,7 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
-## 1.4.0 - 2026-08-09
+## 1.5.0 - 2026-08-09
 
 ### Added
 
@@ -65,6 +65,12 @@ alter how your covers move is called out explicitly.
   `Warning` event entity fires. The `Irradiance` sensors go Unknown rather
   than holding a stale figure. If sunshine is missing too, the sun is
   genuinely unknown and the shade is kept in.
+- **If you briefly ran the 1.4.0 that was published earlier today**, three of
+  its options were renamed before release: `awning_tilt` became
+  `awning_min_elevation` (an awning's limit is the sun's height, not its own
+  pitch), and `irradiance_min_awning` / `irradiance_min_backup` merged into
+  `irradiance_min_shade` (they shade the same opening). Check the
+  Configuration tab after updating; the old keys are not carried over.
 - The irradiance figure assumes the surface faces the sun, making it an upper
   bound that holds for every window on the building. *Which* window the sun is
   actually on remains a question for your automation — see the sun-position
