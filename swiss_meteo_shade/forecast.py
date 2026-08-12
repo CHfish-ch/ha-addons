@@ -51,6 +51,7 @@ OPENMETEO_MODES = ("always", "fallback_only", "never")
 # already fetched for gust/sunshine/temperature.
 GHI_PARAM = "gre000h0"   # global radiation, hourly mean, W/m2
 DHI_PARAM = "ods000h0"   # diffuse radiation, hourly mean, W/m2
+RAIN_PARAM = "rre150h0"  # precipitation, hourly total, mm
 
 
 def _session():
@@ -102,7 +103,8 @@ def from_app(plz, session=None, lookahead_h=LOOKAHEAD_H):
         r.raise_for_status()
         graph = r.json().get("graph", {})
     except (requests.RequestException, ValueError) as exc:
-        events.warn(f"app forecast unreachable: {type(exc).__name__}: {exc}")
+        events.warn(f"app forecast unreachable: {type(exc).__name__}",
+                    detail=str(exc))
         return None
 
     if not graph:
@@ -378,7 +380,7 @@ def _fetch_forecast_param(session, point_id, param, lookahead_h, assets,
         if rows:
             return _window_from_rows(rows, lookahead_h, back_hours)
         events.warn(f"forecast {param} download failed and nothing cached: "
-                    f"{type(exc).__name__}")
+                    f"{type(exc).__name__}", detail=str(exc))
         return None
 
     if r.status_code == 304 and not force:
@@ -574,8 +576,9 @@ def irradiance_now(lv95_e, lv95_n, lat, lon, session=None, tilts=(90, 45),
     ghi = next((v for t, v in ghi_rows if t == hour_end), None)
     dhi = next((v for t, v in dhi_rows if t == hour_end), None)
     if ghi is None or dhi is None:
-        events.warn(f"radiation forecast has no row for {hour_end:%Y-%m-%d %H}"
-                    f"Z -> irradiance unavailable this cycle")
+        events.warn("radiation forecast has no row for the current hour "
+                    "-> irradiance unavailable",
+                    detail=f"{hour_end:%Y-%m-%d %H}Z")
         return None
 
     obs = solar.observer(lat, lon, height_m)
@@ -593,6 +596,81 @@ def irradiance_now(lv95_e, lv95_n, lat, lon, session=None, tilts=(90, 45),
         "diffuse_fraction": (dhi / ghi) if ghi else None,
     })
     return result
+
+
+def precipitation_now(plz, lv95_e, lv95_n, session=None, now=None):
+    """Forecast precipitation for the current hour -- the radar's stand-in.
+
+    Returns {"mm": float|None, "sources": {name: mm}} where `mm` is the MAX
+    across every series that answered, or None when none did.
+
+    Max, not mean, deliberately: this is the same cautious-direction rule the
+    gust sources already use. For a physical awning the two failure modes are
+    not equal -- a false alarm costs an hour of shade, a miss costs a soaked
+    awning -- so an extra source may only ever raise caution.
+
+    That matters here because the two app series are known to miss DIFFERENT
+    events: on 2026-07-30 `precipitation10m` read 0.0 through a 9.35 mm/h
+    shower while `precipitation1h` caught it, and the next morning they
+    swapped. Either alone is one-for-two; together they caught both.
+
+    Only reached when the radar is unavailable, so the exposure is bounded to
+    outage windows. It is a real downgrade -- hourly rather than 5-minutely,
+    a point forecast rather than a 1 km observation, predicted rather than
+    observed -- and the caller must report that it is in use.
+    """
+    s = session or _session()
+    now = now or datetime.now(timezone.utc)
+    # Hourly values are stamped with the END of the period they cover, so the
+    # hour containing `now` is the one stamped at the next full hour.
+    hour_end = (now.replace(minute=0, second=0, microsecond=0)
+                + timedelta(hours=1))
+    sources = {}
+
+    # 1. official, documented -- the one that should always be there
+    try:
+        point = _find_forecast_point(s, lv95_e, lv95_n)
+        assets = _newest_item_with(s, (RAIN_PARAM,)) if point else None
+        if assets:
+            rows = hourly_series(s, point, RAIN_PARAM, assets)
+            v = next((v for t, v in (rows or []) if t == hour_end), None)
+            if v is not None:
+                sources["official"] = float(v)
+    except (requests.RequestException, ValueError):
+        pass
+
+    # 2. the app's two arrays -- best effort; some postcodes carry no data at
+    #    all, and the endpoint is undocumented, so neither is required.
+    try:
+        g = s.get(f"{APP}/v1/plzDetail", params={"plz": f"{plz}00"},
+                  timeout=25).json().get("graph", {})
+    except (requests.RequestException, ValueError):
+        g = {}
+    start_ms = g.get("start")
+    if start_ms:
+        start = datetime.fromtimestamp(start_ms / 1000, tz=timezone.utc)
+        # 10-minute buckets are mm ACCUMULATED per bucket; x6 to compare with
+        # an hourly total. Take the wettest bucket in the hour so a brief
+        # intense shower is not averaged away.
+        peak = None
+        for i, v in enumerate(g.get("precipitation10m", [])):
+            if v in (None, MISSING_APP):
+                continue
+            t = start + timedelta(minutes=10 * i)
+            if t.replace(minute=0, second=0, microsecond=0) + timedelta(
+                    hours=1) == hour_end:
+                peak = float(v) * 6.0 if peak is None else max(peak,
+                                                               float(v) * 6.0)
+        if peak is not None:
+            sources["app_10min"] = peak
+        arr = g.get("precipitation1h", [])
+        idx = int((hour_end - timedelta(hours=1) - start).total_seconds() // 3600)
+        if 0 <= idx < len(arr) and arr[idx] not in (None, MISSING_APP):
+            sources["app_hourly"] = float(arr[idx])
+
+    if not sources:
+        return None
+    return {"mm": max(sources.values()), "sources": sources}
 
 
 def gather(plz, lv95_e, lv95_n, lat, lon, openmeteo_mode="always",

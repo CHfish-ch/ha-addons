@@ -28,7 +28,7 @@ correct.
 ├── tests/                   conftest + test_logic, test_events, test_events_entity,
 │                            test_radar, test_imports, test_options, test_forecast,
 │                            test_device_link, test_irradiance, test_solar,
-│                            test_sun_model
+│                            test_sun_model, test_rain_fallback
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -65,7 +65,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.5.1. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.5.2. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -100,7 +100,7 @@ there are conditions where neither fires (intended).
   SIGTERM/SIGINT, watchdog exit after repeated failures, hysteresis persistence
   to `/data`.
 - `shade.py` — calls radar + forecast, applies the three sun thresholds, builds
-  the state dict, publishes MQTT discovery for 27 entities (17 sensors,
+  the state dict, publishes MQTT discovery for 29 entities (19 sensors,
   8 binary, 2 `event`).
 - `forecast.py` — gust/sun/temp from official OGD + app fallback + Open-Meteo,
   plus the conditional-GET cache.
@@ -206,9 +206,57 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   `forecast_max_cache_minutes` on a clock **we** own (not the server's), plus a
   sha256 mismatch check that logs an error if the ETag lied. `0` means **never
   force**, not "always download".
-- Event sensors: state is the timestamp of when the current message **first**
-  appeared; repeats don't update it. Attributes come from a dedicated small
-  topic. Both exist so a persistent condition notifies once, not every cycle.
+- **An event message IS the dedup key -- never interpolate a moving value.**
+  `events.warn/error(message, detail=...)`: `message` is stored, shown in HA
+  and compared for repeats; `detail` goes to the Log only. A changing value in
+  `message` silently breaks deduplication -- every cycle reads as a new event,
+  the sensor timestamp moves and the `event` entity re-fires. Bit us
+  2026-08-12: "radar frame 250.7 min old" ticked up each cycle, so a 4 h radar
+  outage produced ~50 notifications for one fault. The same trap hides in
+  exception reprs, which embed object addresses (`<...HTTPSConnection object
+  at 0x7f...>`) -- three identical failures give three distinct strings. Put
+  `type(exc).__name__` in the message and `str(exc)` in the detail. Locked by
+  `test_events.py`.
+- **Rain falls back radar -> forecast -> `radar_fail_safe`** (1.5.2). The
+  2026-07-30 rejection of a forecast fallback used the WRONG criterion: it
+  rejected the app feed for MISSING events, but a miss in a fallback degrades
+  to "dry" -- exactly what `radar_fail_safe: false` already gives, so never
+  worse than the baseline. The cost that matters is a FALSE ALARM.
+  `forecast.precipitation_now` takes the **max** across official `rre150h0`
+  plus the app's `precipitation10m` and `precipitation1h`. Max, not one
+  source: the two app series miss DIFFERENT events (2026-07-30 and the morning
+  after), so either alone is one-for-two while together they caught both. Same
+  cautious-direction rule as the gust maximum, and justified by the asymmetry
+  -- a false alarm costs an hour of shade, a miss costs a soaked awning. Only
+  reached when the radar is down, so the exposure is bounded.
+  **False-alarm rates are still unmeasured.** `tools/precip_probe.py` scores
+  all three against the radar archive and accumulates into a ledger; it
+  refuses a verdict under 100 hours / 10 wet. If it later shows a series
+  crying wolf, drop that series -- do not drop the max.
+  Note `radar._item_assets` returns `{name: href}` while `forecast`'s returns
+  `{name: {"href":...}}` -- confusing the two silently yields "no radar".
+- **One condition must emit exactly ONE warning.** Only the latest warning is
+  stored, so TWO warnings alternating each cycle defeat deduplication just as
+  surely as one message with a moving value in it -- each alternation reads as
+  a new event and re-fires. Caught by `test_rain_fallback.py` before shipping:
+  warning "radar is stale" and then "using the forecast" in the same cycle
+  produced a fresh timestamp every cycle. Collapse to one warning and carry
+  the reason in `detail`.
+- **`Active error` / `Active warning` are STATE, not a log** (1.5.2). They read
+  "<message> since <when>" and clear to "none" on the first cycle that does
+  not re-report the fault. `events.start_cycle()` at the top of
+  `shade.evaluate` is what makes "resolved" knowable -- the code is told when
+  things go wrong, never when they come right, so "nothing reported this
+  cycle" is the only available signal.
+  Two separate jobs inside `start_cycle`, and conflating them costs a cycle of
+  lag: `_this_cycle` gates `snapshot`/`state_text` so a clean cycle clears
+  IMMEDIATELY, while `_last` is dropped only after a whole clean cycle so a
+  recurrence gets a NEW `since` (and re-fires the event entity).
+  This is only safe because the `event` entities carry the permanent history.
+  Do not "restore" persistence to /data: reloading a fault from before a
+  restart would claim one that may already be over.
+  The state deliberately carries a fixed `since` rather than a duration -- a
+  ticking value would rewrite the state every cycle and flood the recorder.
 - **`event` entities (1.2.0) are the automation surface; the `last_error` /
   `last_warning` sensors are kept for display and for existing automations.**
   The sensors put the burden of "is this timestamp actually new?" on a
@@ -440,7 +488,7 @@ config changes came out of the investigation:
 
 ## Current state
 
-- 27 MQTT entities. Operational: recommendation, the three shade decisions, and
+- 29 MQTT entities. Operational: recommendation, the three shade decisions, and
   the weather inputs. Diagnostic: source, radar age, radar/forecast health,
   reason, last error/warning, per-source gusts.
 - 23 config options, all documented in `README.md` **and** `translations/en.yaml`.
@@ -514,6 +562,18 @@ config changes came out of the investigation:
   locks every upgrade path. Do the same for any future rename, and don't add
   the legacy key back to `config.yaml`'s schema (it would reappear in the
   Configuration UI).
+- **The import guard has two halves, and the second was added late.**
+  `test_no_unresolved_global_names` catches a missing IMPORT, but not a call
+  into a sibling module whose function was deleted: `events` resolves fine as
+  a global and the missing name is an ATTRIBUTE on it. A leftover
+  `events.set_persist_path(...)` in `run.py` survived a refactor exactly that
+  way and would have crashed the container at boot.
+  `test_no_calls_into_missing_module_attributes` pairs LOAD_GLOBAL with the
+  following LOAD_ATTR to cover it. Note `_functions()` filters on
+  `__module__`: without that it descends into astral's code via `solar.py`'s
+  imports and reports its internals as our unresolved names.
+  Keep `MODULES` in that file in step with the Dockerfile COPY list, or newer
+  modules are simply not checked.
 - **`py_compile` is not a verification.** 1.1.0 shipped `run.py` referencing
   `USER_AGENT` without importing it: a missing import is a runtime NameError,
   not a syntax error, so compiling passed and every unit test passed (none

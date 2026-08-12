@@ -21,21 +21,34 @@ sys.path.insert(0, os.path.normpath(os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "..", "swiss_meteo_shade")))
 
 # Every module shipped in the container (must match the Dockerfile COPY line).
-MODULES = ["version", "events", "logic", "radar", "forecast", "shade", "run"]
+MODULES = ["version", "events", "logic", "radar", "forecast", "shade",
+           "run", "irradiance", "solar"]
 
 
 def _functions(obj, seen=None):
-    """Every function defined in a module, including nested and methods."""
+    """Functions DEFINED in this module -- not ones merely imported into it.
+
+    The __module__ filter matters: `solar.py` does `from astral import
+    Observer`, and without it the walk descends into astral's own code and
+    flags its internals as unresolved names in our module.
+    """
     seen = seen if seen is not None else set()
+    own = getattr(obj, "__name__", None)
     out = []
+
+    def mine(f):
+        return getattr(f, "__module__", None) == own
+
     for value in vars(obj).values():
         if isinstance(value, types.FunctionType) and id(value) not in seen:
             seen.add(id(value))
-            out.append(value)
+            if mine(value):
+                out.append(value)
         elif isinstance(value, type) and id(value) not in seen:
             seen.add(id(value))
-            out.extend(v for v in vars(value).values()
-                       if isinstance(v, types.FunctionType))
+            if getattr(value, "__module__", None) == own:
+                out.extend(v for v in vars(value).values()
+                           if isinstance(v, types.FunctionType) and mine(v))
     return out
 
 
@@ -110,6 +123,45 @@ def test_version_is_consistent_across_manifests():
     assert version.VERSION == cfg == lbl, (
         f"version drift: version.py={version.VERSION}, "
         f"config.yaml={cfg}, Dockerfile={lbl}")
+
+
+def _module_attr_uses(func, modules):
+    """(module_name, attr) pairs the function will look up at runtime.
+
+    Bytecode for `events.set_persist_path(...)` is LOAD_GLOBAL 'events' then
+    LOAD_ATTR/LOAD_METHOD 'set_persist_path', so pairing the two finds calls
+    into a sibling module.
+    """
+    pairs, stack = set(), [func.__code__]
+    while stack:
+        code = stack.pop()
+        ins = list(dis.get_instructions(code))
+        for a, b in zip(ins, ins[1:]):
+            if (a.opname == "LOAD_GLOBAL" and a.argval in modules
+                    and b.opname in ("LOAD_ATTR", "LOAD_METHOD")):
+                pairs.add((a.argval, b.argval))
+        stack.extend(c for c in code.co_consts if isinstance(c, types.CodeType))
+    return pairs
+
+
+def test_no_calls_into_missing_module_attributes():
+    """Guards against calling a sibling module function that no longer exists.
+
+    `test_no_unresolved_global_names` cannot see this: `events` resolves fine
+    as a global, and the missing name is an ATTRIBUTE on it. A leftover
+    `events.set_persist_path(...)` in run.py survived a refactor this way and
+    would have crashed the container at startup.
+    """
+    loaded = {name: importlib.import_module(name) for name in MODULES}
+    problems = []
+    for name, module in loaded.items():
+        for func in _functions(module):
+            for mod_name, attr in _module_attr_uses(func, loaded):
+                if not hasattr(loaded[mod_name], attr):
+                    problems.append(
+                        f"{name}.{func.__name__} calls {mod_name}.{attr}, "
+                        f"which does not exist")
+    assert not problems, "missing module attributes:\n  " + "\n  ".join(problems)
 
 
 def _section_keys(path, section):

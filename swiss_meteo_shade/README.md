@@ -57,7 +57,8 @@ From those:
 
 - `sun` = meaningful sunshine expected in the look-ahead window
 - `wind_high` = highest forecast gust in the window ≥ your `gust_limit_kmh`
-- `rain` = radar shows rain within 10 minutes
+- `rain` = radar shows rain within 10 minutes (or, if the radar is out,
+  the forecast expects rain this hour — see *When the radar is unavailable*)
 
 And the outputs:
 
@@ -107,8 +108,7 @@ vertical blind versus a sloped awning.
 **`irradiance`.** Computes the solar power arriving on the surface in **W/m²**,
 from the MeteoSwiss global and diffuse radiation forecast, and compares it
 against `irradiance_min_shade` and `irradiance_min_independent`. It captures
-three
-things the minutes model cannot:
+three things the minutes model cannot:
 
 - **Intensity.** Overcast is roughly 100–200 W/m², hazy sun 300–500, full clear
   sun 700–1000.
@@ -297,7 +297,7 @@ Open the app's **Configuration** tab:
 | `irradiance_substeps` | *(irradiance model)* sun-path samples per hour | `12` |
 | `radar_threshold_mmh` | rain rate that counts as rain | `0.1` |
 | `radar_tolerance_km` | tolerance around your cell for forecast steps | `1` |
-| `radar_fail_safe` | if the radar is unreachable, treat as rain (retract) instead of assuming dry | `false` |
+| `radar_fail_safe` | last resort if radar **and** forecast precipitation are unavailable: treat as rain instead of dry | `false` |
 | `interval_seconds` | how often to run | `300` |
 | `forecast_max_cache_minutes` | force a full forecast re-download after this long, even if the server says unchanged; `0` = never force by timer (rely on the conditional request) | `60` |
 
@@ -404,17 +404,22 @@ separate "Diagnostic" section on the device page and are the ones to check when
 something looks off, not for daily automations.
 
 **Diagnostics:** `forecast_source` (`official` / `app`), `radar_age` (min),
-`shade_reason` — a plain-language explanation of the current decision, e.g.
-*"sun, but gust 46>=40 km/h and rain approaching"* — and two event sensors:
-`last_error` and `last_warning`. Each holds the **timestamp** of the most
-recent event of that level as its state (so it renders as a time and you can
-trigger on it), with the message in the `last_error_message` /
-`last_warning_message` attributes. "Last error" may be from long ago — the name
-reflects that it does not clear; a clean run simply doesn't update it.
+`rain_source` (`radar` / `forecast` / `assumed`), `shade_reason` — a
+plain-language explanation of the current decision, e.g. *"sun, but gust
+46>=40 km/h and rain approaching"* — and two health sensors:
 
-The two event sensors (`last_error`, `last_warning`) carry the full state as
-attributes; the message lives in `last_error_message` / `last_warning_message`.
-Other sensors don't carry attributes (to keep the recorder small).
+- **`Active error` / `Active warning`** read `"<what is wrong> since <when>"`,
+  and go to `none` as soon as a cycle completes without it. They describe the
+  situation **right now**, so a fault that has resolved stops showing. A
+  condition that persists keeps its original *since* time rather than ticking,
+  so the value stays put while it lasts.
+- If the same fault returns after a clean spell it counts as a **new**
+  occurrence, with a new *since* time — it is not the old one continuing.
+
+Nothing is lost by clearing: the **`event` entities** fire once per new event,
+so Home Assistant's logbook and any notification you have set up keep the
+permanent record. The sensors are the current state; the events are the
+history.
 
 **Events (the ones to automate on):** `event.swiss_meteo_shade_error` and
 `event.swiss_meteo_shade_warning`. Unlike the sensors above, these *fire* once
@@ -734,12 +739,31 @@ that look fresh. After a long run of consecutive failures the app exits so the
 Supervisor Watchdog restarts the container, clearing any stuck network state. A radar outage alone does not hide the forecast-driven
 entities; the cycle stays healthy as long as either radar or forecast answers.
 
-**Fail-safe on radar.** If the radar service is unreachable, rain is unknown.
-By default (`radar_fail_safe: false`) the app assumes dry and leaves the awning
-out if wind is calm — a brief radar outage during clear weather shouldn't pull
-it in. In high-exposure spots where a missed shower is costly, set
-`radar_fail_safe: true` to treat a radar outage as rain and retract. Either way
-the outage is logged to `last_warning`.
+**When the radar is unavailable.** MeteoSwiss radar outages are real — it
+stopped publishing for four hours on 2026-08-12 — so rain falls back through
+three stages:
+
+1. **Radar** (1 km, 5 min, observed, projected to +10 min) — normal operation.
+2. **Forecast precipitation**, if the radar is out. Taken as the **maximum**
+   across the official `rre150h0` and the MeteoSwiss app's two precipitation
+   arrays, so any one of them seeing rain is enough. That is the cautious
+   direction, the same rule the gust sources use: for an awning a false alarm
+   costs an hour of shade, while a miss costs a soaked awning.
+3. **`radar_fail_safe`**, only if the forecast is unavailable too. `false`
+   (default) assumes dry; `true` assumes rain and retracts.
+
+The forecast is a genuine downgrade and the add-on says so rather than hiding
+it: `Rain source` reads `radar` / `forecast` / `assumed`, `Rain (forecast
+fallback)` shows the millimetres, and a warning is recorded. It is hourly and
+point-resolution, answering *"is rain expected this hour"* rather than *"is
+rain arriving in ten minutes"*, so a convective shower the model missed can
+still slip through. Better than a constant; not a substitute for radar.
+
+> The three series are unproven against each other — they are known to miss
+> *different* events, which is why all three are combined, but their
+> false-alarm rates have never been measured. `tools/precip_probe.py` scores
+> them against the radar archive and accumulates across runs if you want to
+> check yours.
 
 **Fail-safe on wind.** Gust is the safety input for the awning. If *every* gust
 source fails in a cycle (official, app, and Open-Meteo all unreachable), the

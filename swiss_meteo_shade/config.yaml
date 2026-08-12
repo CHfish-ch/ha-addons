@@ -1,5 +1,5 @@
 name: Swiss Meteo Shade
-version: "1.5.1"
+version: "1.5.2"
 slug: swiss_meteo_shade
 description: Weather-driven awning & blind automation from MeteoSwiss open data (Switzerland only)
 arch:

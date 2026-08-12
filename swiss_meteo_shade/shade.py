@@ -53,9 +53,8 @@ SUN_MIN_INDEPENDENT = 20
 # shading device. Only one set of thresholds is consulted -- see SUN_MODEL.
 # The awning and the backup blind cover the SAME opening and are a strict
 # partition of one decision (the blind substitutes for the awning), so they
-# share a
-# threshold. The independent blinds are different windows -- often interior
-# glare blinds wanted in weaker sun -- so they keep their own.
+# share a threshold. The independent blinds are different windows -- often
+# interior glare blinds wanted in weaker sun -- so they keep their own.
 IRRADIANCE_MIN_SHADE = 250
 IRRADIANCE_MIN_INDEPENDENT = 250
 # Every output is judged on the vertical window plane. An awning was once
@@ -152,15 +151,19 @@ def _sun_flags(fc, irr, model):
 
 
 def _events_state():
-    """Flatten the latest error/warning into state fields for the two sensors.
+    """Flatten the ACTIVE error/warning into state fields for the two sensors.
 
-    Each sensor's state is the event's timestamp, or '' when nothing has been
-    recorded yet (HA shows that as unknown). The message travels as an attribute
-    on the dedicated events topic, not the main state topic, so ordinary cycle
-    updates can't churn it."""
+    The state reads "<message> since <when>", or "none" once a clean cycle has
+    cleared it -- so a resolved fault stops looking live. History is not lost:
+    the `event` entities fire once per new event, so the logbook and any
+    notification keep the permanent record. The message and first-seen time
+    also travel as attributes on the dedicated events topic, which stays
+    byte-identical between cycles while a condition persists."""
     snap = events.snapshot()
     err, warn = snap["last_error"], snap["last_warning"]
     return {
+        "active_error": events.state_text("error"),
+        "active_warning": events.state_text("warning"),
         "last_error_time": err["time"] if err else None,
         "last_error_message": err["message"] if err else "none",
         "last_error_count": err.get("count", 1) if err else 0,
@@ -174,6 +177,8 @@ def _events_state():
 
 def evaluate(session=None, prev_wind_high=False):
     """Run all sources and the decision. `session` is reused across cycles."""
+    # Anything not re-reported during this cycle counts as resolved.
+    events.start_cycle()
     e, n = POS_LV95
     lat, lon = _lv95_to_wgs84(e, n)
 
@@ -182,22 +187,52 @@ def evaluate(session=None, prev_wind_high=False):
     radar.POS_WGS84 = None
     radar.THRESHOLD_MMH = RADAR_THRESHOLD_MMH
     radar.FORECAST_TOLERANCE_KM = RADAR_TOLERANCE_KM
+    rain_source = "radar"
+    rain_sources = {}
+    radar_why = None            # why the radar is out, for the ONE warning
     try:
         rad = radar.evaluate(session=session)
         if rad.get("stale"):
             # A6: a frame older than the radar module's limit must not be
             # reported as confident rain=False. Treat as unavailable.
-            events.warn(f"radar frame {rad.get('age_min')} min old "
-                        f"-> treated as unavailable")
             radar_ok = False
-            rain = bool(RADAR_FAIL_SAFE)
+            radar_why = f"newest frame {rad.get('age_min')} min old"
         else:
             rain = bool(rad.get("any"))
             radar_ok = True
     except Exception as exc:
-        events.warn(f"radar unavailable: {type(exc).__name__}: {exc}")
         rad, radar_ok = {}, False
-        rain = bool(RADAR_FAIL_SAFE)      # A7: honour fail-safe on outage too
+        radar_why = f"{type(exc).__name__}: {exc}"
+
+    # ONE warning for one condition. Emitting a "radar is stale" warning here
+    # and a "using the forecast" warning below would ALTERNATE, and since only
+    # the latest warning is kept, each alternation reads as a new event and
+    # re-fires the notification -- the same storm a moving value causes.
+    if not radar_ok:
+        # Radar down. Rather than guess with a constant, ask the forecast --
+        # hourly and point-resolution, so a real downgrade, but a downgrade
+        # beats a coin flip. RADAR_FAIL_SAFE remains the last resort for when
+        # even that is unavailable.
+        fb = None
+        try:
+            fb = forecast.precipitation_now(PLZ, e, n, session=session)
+        except Exception as exc:
+            events.warn(f"precipitation fallback failed: {type(exc).__name__}",
+                        detail=str(exc))
+        if fb and fb.get("mm") is not None:
+            rain = fb["mm"] >= RADAR_THRESHOLD_MMH
+            rain_source = "forecast"
+            rain_sources = fb["sources"]
+            events.warn("radar unavailable -> rain taken from the forecast "
+                        "(hourly, point resolution)",
+                        detail=f"{radar_why}; {fb['mm']:.2f} mm from "
+                               f"{', '.join(sorted(fb['sources']))}")
+        else:
+            rain = bool(RADAR_FAIL_SAFE)
+            rain_source = "assumed"
+            events.warn("radar AND precipitation forecast unavailable -> "
+                        f"rain assumed {'wet' if RADAR_FAIL_SAFE else 'dry'} "
+                        "(radar_fail_safe)", detail=radar_why)
 
     # 2. forecast gust + sunshine + temp
     fc = forecast.gather(PLZ, e, n, lat, lon, openmeteo_mode=OPENMETEO_MODE,
@@ -216,7 +251,8 @@ def evaluate(session=None, prev_wind_high=False):
                 min_elevation=MIN_SOLAR_ELEVATION,
                 substeps=IRRADIANCE_SUBSTEPS)
         except Exception as exc:
-            events.warn(f"irradiance unavailable: {type(exc).__name__}: {exc}")
+            events.warn(f"irradiance unavailable: {type(exc).__name__}",
+                        detail=str(exc))
         if irr is None:
             # Fall back to the sunshine model rather than losing the sun
             # signal outright -- a radiation outage should not stop the shade
@@ -265,6 +301,9 @@ def evaluate(session=None, prev_wind_high=False):
         "recommendation": dec["recommendation"],
         "reason": dec["reason"],
         "rain": dec["rain"],
+        "rain_source": rain_source,
+        "rain_forecast_mm": (round(max(rain_sources.values()), 2)
+                             if rain_sources else None),
         "sun": dec["sun"],
         "wind_high": dec["wind_high"],
         "gust_kmh": fc["gust_kmh"],
@@ -341,11 +380,14 @@ SENSORS = [
     ("diffuse_fraction", "Diffuse fraction", "diffuse_fraction", "%",
      "diagnostic"),
     ("sun_model", "Sun model", "sun_model", None, "diagnostic"),
+    ("rain_source", "Rain source", "rain_source", None, "diagnostic"),
+    ("rain_forecast_mm", "Rain (forecast fallback)",
+     "rain_forecast_mm", "mm", "diagnostic"),
     ("forecast_source", "Forecast source", "forecast_source", None, "diagnostic"),
     ("radar_age_min", "Radar age", "radar_age_min", "min", "diagnostic"),
     ("reason", "Shade reason", "reason", None, "diagnostic"),
-    ("last_error_time", "Last error", "last_error_time", None, "diagnostic"),
-    ("last_warning_time", "Last warning", "last_warning_time", None, "diagnostic"),
+    ("active_error", "Active error", "active_error", None, "diagnostic"),
+    ("active_warning", "Active warning", "active_warning", None, "diagnostic"),
     # Only the ACTIVE primary source has a value: official and app are a
     # primary/fallback pair, never queried in parallel, so whichever is not in
     # use reads Unknown. Open-Meteo is populated whenever openmeteo_mode is
@@ -368,10 +410,11 @@ EVENT_ENTITIES = [
 ]
 
 # numeric sensors need value_template guards so JSON null doesn't become "None"
-_NULLABLE_STR = {"forecast_source", "sun_model"}   # B8: else Jinja renders the string "None"
+_NULLABLE_STR = {"forecast_source", "sun_model", "rain_source"}   # B8: else Jinja renders the string "None"
 _NUMERIC = {"gust_kmh", "sunshine_minutes", "temp_c", "radar_age_min",
             "gust_official", "gust_app", "gust_openmeteo",
             "irradiance_window", "solar_elevation", "ghi",
+            "rain_forecast_mm",
             "diffuse_fraction"}
 
 
@@ -423,7 +466,7 @@ def announce_discovery(client):
         # B4: only the two event sensors need the full state as attributes
         # (for last_error_message / last_warning_message). Putting it on every
         # sensor writes the whole ~30-key JSON to the recorder each cycle.
-        if key in ("last_error_time", "last_warning_time"):
+        if key in ("active_error", "active_warning"):
             # dedicated topic: it only changes when an event actually changes,
             # so attribute churn can't re-trigger notification automations, and
             # the recorder isn't handed ~35 keys twice a cycle.
@@ -437,10 +480,9 @@ def announce_discovery(client):
             cfg["state_class"] = "measurement"
         if cat:
             cfg["entity_category"] = cat
-        if key in ("last_error_time", "last_warning_time"):
-            cfg["device_class"] = "timestamp"
-            cfg["value_template"] = (
-                "{{ value_json.%s if value_json.%s else '' }}" % (key, key))
+        # No timestamp device_class any more: the state is now
+        # "<message> since <when>" rather than a bare timestamp, so HA must
+        # render it verbatim.
         pub("sensor", slug, cfg, diagnostic=(cat == "diagnostic"))
 
     for slug, name, topic, etype in EVENT_ENTITIES:

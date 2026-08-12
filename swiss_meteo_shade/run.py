@@ -319,9 +319,9 @@ def main():
     signal.signal(signal.SIGINT, _on_sigterm)
     opts = load_options()
     apply_options(opts)
-    # persist diagnostic events across restarts if /data is available
-    if os.path.isdir("/data"):
-        events.set_persist_path("/data/last_events.json")
+    # Events are deliberately NOT persisted: the sensors now report what is
+    # wrong RIGHT NOW, so reloading a fault from before a restart would claim
+    # one that may already be over. History lives in the `event` entities.
 
     e, n = shade.POS_LV95
     if not shade.in_radar_grid(e, n):

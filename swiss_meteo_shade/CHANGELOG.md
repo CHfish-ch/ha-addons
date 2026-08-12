@@ -5,6 +5,68 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.5.2 - 2026-08-12
+
+### Fixed
+
+- **A sustained fault could notify you every few minutes instead of once.**
+  Warnings are deduplicated by their text so an ongoing problem reports once —
+  but several messages embedded a value that changes every cycle: the radar
+  frame's age ticking up, or an exception whose Python repr contains a memory
+  address. Each cycle therefore looked like a brand-new event, moving the
+  `Last warning` timestamp and re-firing the `Warning` event entity. During a
+  four-hour radar outage that is roughly fifty notifications for one fault.
+
+  Varying values now go in a detail field written to the Log and never used
+  for deduplication, so the same outage fires **once** while every occurrence
+  stays in the Log with its own timestamp and a running count.
+
+### Added
+
+- **The forecast now stands in for the radar during an outage.** Previously a
+  radar outage left `radar_fail_safe` — a constant — as the only rain signal,
+  so a shower during those four hours would have gone unnoticed on the default
+  setting. Rain is now taken from forecast precipitation instead, as the
+  **maximum** across the official `rre150h0` and the MeteoSwiss app's two
+  precipitation arrays: any one of them seeing rain is enough. That is the
+  cautious direction, matching the existing gust rule — for an awning a false
+  alarm costs an hour of shade while a miss costs a soaked awning, and the two
+  app series are known to miss *different* events.
+
+  `radar_fail_safe` still applies, but only as the last resort when the
+  forecast is unavailable too.
+
+  It is a real downgrade and is reported as one: `Rain source` reads `radar` /
+  `forecast` / `assumed`, `Rain (forecast fallback)` shows the millimetres,
+  and a warning is recorded. Hourly and point-resolution, it answers "is rain
+  expected this hour" rather than "is rain arriving in ten minutes", so a
+  convective shower the model missed can still slip through.
+
+- **`Last error` / `Last warning` are now `Active error` / `Active warning`.**
+  They read `"<what is wrong> since <when>"` and clear to `none` as soon as a
+  cycle completes without the fault, so a resolved problem stops looking live.
+  Previously they never cleared. Nothing is lost: the `event` entities have
+  carried the permanent history since 1.2.0, so the sensors are free to be
+  state. A fault returning after a clean spell counts as a new occurrence with
+  a new *since* time.
+
+  **Entity IDs change** — `sensor.…_last_error` becomes
+  `sensor.…_active_error`. Update any dashboard card or automation that
+  referenced them. Events are no longer persisted across restarts either,
+  since reloading a fault from before a restart would claim one that may
+  already be over.
+
+### Notes
+
+- If you saw repeated `radar frame … min old` warnings on 2026-08-12: the
+  add-on was right and the outage was real. MeteoSwiss stopped publishing
+  radar frames at 09:30 UTC, and every later frame returned 403. Rain was
+  treated as unavailable and your `radar_fail_safe` setting applied, which is
+  the intended behaviour — only the notification volume was wrong.
+- `tools/precip_probe.py` scores the three series against the radar archive
+  and accumulates across runs, so the false-alarm rates can be measured rather
+  than assumed. It refuses a verdict below 100 hours including 10 wet ones.
+
 ## 1.5.1 - 2026-08-10
 
 ### Changed
