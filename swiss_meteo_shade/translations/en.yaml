@@ -61,7 +61,7 @@ configuration:
     description: "How far around your exact cell the radar looks when projecting rain forward. 1 km is a sensible default."
   radar_fail_safe:
     name: Radar fail-safe
-    description: "If the radar service is unreachable, treat it as rain and retract, rather than assuming dry. Turn on in high-exposure spots where a missed shower is costly."
+    description: "Last resort only. If the radar AND the precipitation forecast are both unavailable, rain is unknown: on (default) treats that as rain and retracts, off assumes dry. On by default because the two outcomes are not equal - assuming dry wrongly leaves the awning out in rain, while assuming rain wrongly costs an hour of shade. This is rarely reached: a radar outage alone now falls back to the forecast, and if everything is unreachable the entities go unavailable in Home Assistant instead, so your covers simply stay put."
   interval_seconds:
     name: Update interval (seconds)
     description: "How often to fetch data and republish. 300 (5 min) matches the radar cadence. Raise it on a metered connection."

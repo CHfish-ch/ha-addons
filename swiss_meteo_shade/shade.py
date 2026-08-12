@@ -42,7 +42,7 @@ PREFER_APP = False                     # official primary; True = app first
 LOOKAHEAD_H = 1
 RADAR_THRESHOLD_MMH = 0.1
 RADAR_TOLERANCE_KM = 1
-RADAR_FAIL_SAFE = False               # radar outage -> treat as rain (retract)?
+RADAR_FAIL_SAFE = True    # last resort only: radar AND precipitation gone
 SUN_MODELS = ("sunshine", "irradiance")
 SUN_MODEL = "sunshine"                # how "sunny enough" is judged
 SUN_MIN_AWNING = 20                   # per-output sunshine thresholds (min/h)

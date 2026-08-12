@@ -65,7 +65,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.5.2. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.6.0. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -182,7 +182,16 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   it **always** includes the current hour no matter how small the setting is.
   Shrinking it doesn't filter a bad *current*-hour forecast; it only reduces
   how many hours *before* a forecast hour the system starts reacting to it.
-- **Fail-open on radar by default** (`radar_fail_safe: false`), configurable.
+- **`radar_fail_safe` defaults to TRUE since 1.6.0**, and is now the LAST
+  resort rather than the first. It was false when it fired on every radar
+  hiccup; with the radar -> forecast -> fail-safe chain it is reached only
+  when the radar and all three precipitation series fail together, so the old
+  "a brief outage shouldn't pull the awning in" reasoning no longer applies
+  while the asymmetry does.
+  Measure before re-litigating: if EVERYTHING is unreachable, `healthy` goes
+  False, the operational entities expire in HA, and the setting never reaches
+  the covers at all -- they stay put. It governs only the narrow case where
+  radar + precipitation fail while gust/sun still answer, usually one cycle.
 - **No app-forecast fallback for the radar.** Investigated 2026-07-30/31 and
   rejected against live data; `tools/precip_probe.py` re-runs the test. The
   app does expose `precipitation10m` / `precipitation1h`, anchored to

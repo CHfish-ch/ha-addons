@@ -1,5 +1,5 @@
 name: Swiss Meteo Shade
-version: "1.5.2"
+version: "1.6.0"
 slug: swiss_meteo_shade
 description: Weather-driven awning & blind automation from MeteoSwiss open data (Switzerland only)
 arch:
@@ -31,7 +31,7 @@ options:
   irradiance_substeps: 12
   radar_threshold_mmh: 0.1
   radar_tolerance_km: 1
-  radar_fail_safe: false
+  radar_fail_safe: true
   interval_seconds: 300
   forecast_max_cache_minutes: 60
 schema:

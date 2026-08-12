@@ -134,7 +134,7 @@ def apply_options(opts):
                                     "radar_tolerance_km")
     shade.INTERVAL_SECONDS = _num(g("interval_seconds"), 300, int,
                                   "interval_seconds")
-    shade.RADAR_FAIL_SAFE = bool(g("radar_fail_safe", False))
+    shade.RADAR_FAIL_SAFE = bool(g("radar_fail_safe", True))
     forecast.FORECAST_MAX_CACHE_MINUTES = _num(g("forecast_max_cache_minutes"),
                                                60, int, "forecast_max_cache_minutes")
     shade.SUN_MODEL = _choice(g("sun_model"), "sunshine", shade.SUN_MODELS,

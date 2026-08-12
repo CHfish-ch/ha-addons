@@ -5,6 +5,25 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.6.0 - 2026-08-12
+
+### Changed
+
+- **`radar_fail_safe` now defaults to `true`** — *this can change how your
+  covers move.* It was `false` when it fired on every radar hiccup, where
+  "a brief outage during clear weather shouldn't pull the awning in" was a
+  fair call. It is now the last resort, reached only when the radar **and**
+  all three precipitation series are unavailable at once, so that argument no
+  longer applies while the asymmetry does: assuming dry wrongly leaves the
+  awning out in rain, assuming rain wrongly costs an hour of shade.
+
+  Set it back to `false` in the Configuration tab if you prefer the old
+  behaviour. Worth knowing how narrow this really is: if *everything* is
+  unreachable the entities go unavailable in Home Assistant instead, so your
+  covers simply stay put and this setting never reaches them. It governs only
+  the case where the radar and precipitation fail while gust and sunshine keep
+  working — typically a transient blip lasting a single cycle.
+
 ## 1.5.2 - 2026-08-12
 
 ### Fixed

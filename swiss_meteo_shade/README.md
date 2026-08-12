@@ -297,7 +297,7 @@ Open the app's **Configuration** tab:
 | `irradiance_substeps` | *(irradiance model)* sun-path samples per hour | `12` |
 | `radar_threshold_mmh` | rain rate that counts as rain | `0.1` |
 | `radar_tolerance_km` | tolerance around your cell for forecast steps | `1` |
-| `radar_fail_safe` | last resort if radar **and** forecast precipitation are unavailable: treat as rain instead of dry | `false` |
+| `radar_fail_safe` | last resort if radar **and** forecast precipitation are unavailable: treat as rain instead of dry | `true` |
 | `interval_seconds` | how often to run | `300` |
 | `forecast_max_cache_minutes` | force a full forecast re-download after this long, even if the server says unchanged; `0` = never force by timer (rely on the conditional request) | `60` |
 
@@ -749,8 +749,10 @@ three stages:
    arrays, so any one of them seeing rain is enough. That is the cautious
    direction, the same rule the gust sources use: for an awning a false alarm
    costs an hour of shade, while a miss costs a soaked awning.
-3. **`radar_fail_safe`**, only if the forecast is unavailable too. `false`
-   (default) assumes dry; `true` assumes rain and retracts.
+3. **`radar_fail_safe`**, only if the forecast is unavailable too. `true`
+   (default) assumes rain and retracts; `false` assumes dry. On by default
+   because the outcomes are not equal — assuming dry wrongly leaves the awning
+   out in rain, assuming rain wrongly costs an hour of shade.
 
 The forecast is a genuine downgrade and the add-on says so rather than hiding
 it: `Rain source` reads `radar` / `forecast` / `assumed`, `Rain (forecast
