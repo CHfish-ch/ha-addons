@@ -492,6 +492,22 @@ the maximum across them — the value the decision actually uses.
 
 ## Step 7 — Automations
 
+> **First: find out which action extends your awning.** There is no universal
+> convention and getting it backwards means a safety automation that pushes the
+> awning **out** into the wind it was supposed to bring it in from.
+>
+> Every example below assumes `cover.open_cover` = **extended** and
+> `cover.close_cover` = **retracted**. Many awnings are the other way round —
+> a roller-type motor unrolls the fabric to extend, which the actuator reports
+> as *closing*, so `close_cover` extends and `open_cover` retracts. Both are
+> common and neither is wrong.
+>
+> Check yours before running anything: **Developer Tools → Actions**, call
+> `cover.open_cover` on your awning, and watch what it does. If it retracts,
+> swap **every** `open_cover` / `close_cover` on the awning in the examples
+> below. The backup blind is a separate device and may follow the opposite
+> convention again — test it too.
+
 Extend the awning when safe, retract on the override:
 
 ```yaml
@@ -769,6 +785,7 @@ Replace the `default:` branch from Step 7 with this:
                     attribute: elevation
                     below: 0
             sequence:
+              # RETRACT -- swap for open_cover if yours is the other way round
               - action: cover.close_cover
                 target: {entity_id: cover.terrace_awning}
       # the backup blind goes back up either way -- there is nothing to shade

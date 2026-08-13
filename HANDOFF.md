@@ -65,7 +65,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.6.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.7.0. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -100,13 +100,14 @@ there are conditions where neither fires (intended).
   SIGTERM/SIGINT, watchdog exit after repeated failures, hysteresis persistence
   to `/data`.
 - `shade.py` — calls radar + forecast, applies the three sun thresholds, builds
-  the state dict, publishes MQTT discovery for 29 entities (19 sensors,
-  8 binary, 2 `event`).
+  the state dict, publishes MQTT discovery for 31 entities (19 sensors,
+  10 binary, 2 `event`).
 - `forecast.py` — gust/sun/temp from official OGD + app fallback + Open-Meteo,
   plus the conditional-GET cache.
 - `logic.py` — pure decision function, no I/O, fully unit-testable.
 - `radar.py` — RZC composite → rain now/+5/+10 via Lagrangian persistence.
-- `events.py` — records latest error/warning for two diagnostic sensors.
+- `events.py` — records the ACTIVE error/warning for two diagnostic sensors;
+  clears after a cycle completes without the fault, and is not persisted.
 
 ## Verified facts — probed against live endpoints, do NOT re-guess
 
@@ -241,6 +242,17 @@ day). Do not respond to a repeat report by adding a low-elevation option.
   second standalone `alias:` — a reader who pastes both gets two automations
   firing on the same events with opposite outcomes. This was nearly shipped in
   1.7.0 and caught on review.
+- **Never assert an entity ID or a cover direction as fact.** Both are
+  instance-specific and neither is observable from here; asserting them cost
+  two wrong calls in one review (2026-08-14). Home Assistant assigns an
+  entity_id **once** and keeps it while re-reading the friendly name from
+  discovery on every reconnect, so the two disagree permanently: one instance
+  carries `binary_sensor.swiss_meteo_shade_awning_retract` named *Awning
+  unsafe*, although that name has never been published (checked across the
+  whole git history of `shade.py`). And `cover.open_cover` extends some awnings
+  and retracts others — a roller motor unrolls to extend, which the actuator
+  reports as *closing*. The README now tells the reader to verify both in
+  Developer Tools rather than trusting a printed ID or action.
 - **"Not sunny" is not a reason to close the awning.** Only a hazard or the sun
   actually being down is. See the `sre000h0` verified fact above for why: the
   sun signal reaches zero up to 90 minutes before the sun does.
