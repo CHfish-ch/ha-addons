@@ -5,6 +5,115 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.7.0 - 2026-08-14
+
+### Fixed
+
+- **⚠ The automation this README told you to build can leave the awning out in
+  wind. You have to change it yourself — updating the add-on does not fix it.**
+  *This affects how your covers move.*
+
+  Every README example since 1.3.0 closes the awning on two triggers, `Rain
+  within 10 min` and `Wind high`. Those two do **not** cover every hazard. The
+  add-on retracts on three things:
+
+  ```
+  retract = wind_high OR rain OR (all gust sources failed)
+  ```
+
+  and the third has no component sensor. When every gust source fails, the
+  add-on cannot vouch for wind safety and keeps the awning in — but `Wind high`
+  stays **off** while it does so, deliberately: an *unknown* gust must not be
+  reported as a *high* gust. So both of your triggers stay quiet, your
+  automation never runs, and the awning sits out in precisely the situation the
+  fail-safe exists for.
+
+  **What to do:** replace those two triggers with one, and check any other
+  automation or dashboard that keys off that pair.
+
+  ```yaml
+  - trigger: state
+    entity_id: binary_sensor.swiss_meteo_shade_awning_unsafe
+    to: "on"
+  ```
+
+  `Awning unsafe` is new in this release (below) and is true for all three
+  hazards. The README examples have been updated. If you would rather not
+  change anything, adding a third trigger on `Gust data` → *Problem* closes the
+  same hole.
+
+- **⚠ The documented sun gate could stop the awning closing at all.**
+  *This affects how your covers move.* If you followed *"Only shade when the
+  sun is actually on that window"*, you were told to add the facade gate to the
+  automation's `conditions:`:
+
+  ```yaml
+  conditions:
+    - {sun.sun elevation above 5}
+  ```
+
+  paired with a trigger on `elevation below 5`. Those fight each other. The
+  trigger fires *because* the sun just dropped below 5 — and the condition,
+  evaluated on that same run, now fails, so the automation stops before its
+  actions and the awning is never closed. It stays out overnight. The warning
+  box telling you to add the trigger made this **more** likely, not less.
+
+  **What to do:** move that gate out of `conditions:` and into the `extend`
+  branch of the `choose`, where failing it falls through to `default:` instead
+  of aborting the automation. The README section now shows the branch in full.
+  Worth checking tonight whether your awning is actually coming in.
+
+- **Documentation that had gone stale.** The README still described the
+  `Last error` / `Last warning` sensors renamed in 1.5.2, still claimed events
+  are persisted to `/data` (removed in the same release), and still described
+  `Solar elevation` as gating the awning after that gate was removed in 1.5.1.
+
+### Added
+
+- **`Awning unsafe`** — one entity that is true for **every** hazard, so a
+  close automation cannot miss one. See the fix above for why this matters.
+
+  It is a binary sensor rather than a fourth `Shade recommendation` value
+  because it **crosses** the enum — true in `backup`, and in the hazardous half
+  of `none`. As an enum value every automation would have to match a *set*, and
+  adding a value later would silently break each of those conditions. Making it
+  an entity also means **nothing existing changes meaning**: `none` still means
+  what it always did.
+
+  It does resolve the long-standing ambiguity in `none`, which conflated two
+  opposite situations:
+
+  | `Shade recommendation` | `Awning unsafe` | Meaning |
+  | --- | --- | --- |
+  | `none` | off | Nothing to shade, nothing dangerous — the awning **may stay out** |
+  | `none` | on | Not sunny **and** a hazard — the awning **must** come in |
+
+- **`Gust data`** (diagnostic, OK / Problem) — the hazardous half of `Forecast
+  data` on its own. A missing sunshine forecast costs you shade; a missing gust
+  forecast means wind safety cannot be vouched for, and until now no entity
+  told the two apart.
+
+### Notes
+
+- **Why your awning comes in before sunset.** MeteoSwiss reports **0 sunshine
+  minutes for the hour containing sunset — on every day, including cloudless
+  ones**. Measured at Lucerne across a week of forecasts: the 19:00–20:00 hour
+  gives 45 minutes and 103 W/m² at 10.6° of elevation, the 20:00–21:00 hour
+  gives 0 and 8 W/m² at 1.1° — while that hour still holds 39 minutes of sun,
+  due west, straight into the room.
+
+  The data is right. Sunshine duration counts only minutes with a direct beam
+  above 120 W/m² (WMO), and below ~5° of elevation the air path is long enough
+  that a cloudless sun falls under that line. **No setting fixes it**: the
+  figure is exactly `0`, so no `sun_min_awning` above zero helps, and the
+  `irradiance` model reconstructs the beam from horizontal radiation, which is
+  precisely where a 5° sun deposits nothing. Both models measure power; what
+  you notice at that hour is geometry.
+
+  The README now carries the automation pattern for it — let hazards close the
+  awning and let `sun.sun` end the day, rather than closing on the add-on's sun
+  verdict.
+
 ## 1.6.0 - 2026-08-12
 
 ### Changed

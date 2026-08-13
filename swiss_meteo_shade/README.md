@@ -92,10 +92,39 @@ is sunny enough that the awning stays in but not enough to close the backup,
 so nothing deploys. That is intended for independent thresholds, not a bug; set
 `sun_min_backup` at or below `sun_min_awning` if you always want the backup to
 take over.
+
+### `Awning unsafe` — the safety override
+
 `retract` (= `wind_high OR rain OR all-gust-sources-failed`) is the safety
-override. It is part of the published state JSON but has no entity of its own —
-`Shade recommendation` already distinguishes all three outcomes, and `Wind high`
-and `Rain within 10 min` show why.
+override, published as **`Awning unsafe`**. `Shade recommendation` answers
+*what to deploy*; `Awning unsafe` answers *may the awning be out at all*. It is
+the one entity to close on, because it is true for **every** hazard.
+
+> Use it rather than assembling your own from the component sensors. `Rain
+> within 10 min` and `Wind high` look like they cover everything and do not:
+> when every gust source fails, `wind_high` stays `false` by design — an
+> *unknown* gust must not be reported as a *high* one — while `retract` goes
+> `true`. There is no component sensor for that third hazard, so a pair of
+> triggers on those two stays quiet in exactly the case the fail-safe exists
+> for.
+
+It is a binary sensor rather than a fourth `Shade recommendation` value because
+it **crosses** the enum: it holds in `backup` (a hazard while sunny) and in the
+hazardous half of `none` (a hazard while not sunny). As an enum value every
+automation would have to match a *set*, and adding a value later would silently
+break each of those conditions. `Shade recommendation` answers *what to deploy*;
+`Awning unsafe` answers *may the awning be out at all*.
+
+That distinction is what makes `none` usable. On its own, `none` conflates "no
+reason to be out" with "must come in now" — both read `none`. Paired with
+`Awning unsafe` it is unambiguous:
+
+| `Shade recommendation` | `Awning unsafe` | Meaning |
+| --- | --- | --- |
+| `extend` | off | Sunny and safe — awning out |
+| `backup` | on | Sunny but hazardous — awning in, hard blind down |
+| `none` | **off** | Nothing to shade, but nothing dangerous either — the awning **may stay out** if you want it there |
+| `none` | **on** | Not sunny **and** a hazard — the awning **must** come in |
 
 ### Two ways to judge "sunny enough" — `sun_model`
 
@@ -164,7 +193,7 @@ in hand. Only the official source carries radiation (the app feed has no
 equivalent), so this is a realistic failure to plan for.
 
 The switch is never silent. Three things show it: `Sun model` reads
-`sunshine_fallback`, a warning is recorded on `Last warning`, and the
+`sunshine_fallback`, a warning is recorded on `Active warning`, and the
 `Warning` event entity fires — so you can alert on it exactly as on the
 forecast-source fallback. The two `Irradiance` sensors go Unknown rather than
 holding a stale figure. If sunshine is missing *too*, the sun signal is
@@ -197,7 +226,7 @@ the `Forecast source` entity (a string: `official` or `app`):
   A few Swiss postcodes carry **no app data at all** (the endpoint answers
   normally but returns nothing). That would silently leave you without a
   fallback, so the add-on checks your postcode once at startup and logs a
-  warning — visible in the **Log** tab and on the `Last warning` sensor — if
+  warning — visible in the **Log** tab and on the `Active warning` sensor — if
   yours is one of them. Pick a neighbouring postcode if you see it. The
   warning is about the *fallback* only; the official source is unaffected.
 - **Open-Meteo ICON** (`openmeteo_mode`) — an independent gust forecast on a
@@ -347,20 +376,27 @@ Shade* with all entities (below).
 | `binary_sensor.swiss_meteo_shade_awning_extend` | sunny, calm, dry — safe to extend the awning |
 | `binary_sensor.swiss_meteo_shade_backup_blinds_close` | sunny but windy or rain coming — use the hard blind |
 | `binary_sensor.swiss_meteo_shade_independent_blinds_close` | sunny (and warm enough, if a temp gate is set) — blinds with no wind/rain vulnerability |
+| `binary_sensor.swiss_meteo_shade_awning_unsafe` | **any** hazard — wind, rain, or no gust source answering. The awning must be in, whatever the recommendation says |
 
 **Component signals (binary):** `rain_within_10_min`, `sun_expected`,
-`wind_high`, and `forecast_unavailable`
-(*problem* class — on when a safety-relevant forecast is missing: either **no
-gust source answered** (all failed), in which case the awning is kept in as a
-precaution regardless of sun, or the sunshine forecast is missing (treated as
-not sunny). A present-but-low gust is trusted normally and does **not** trigger
-this.)
+`wind_high`, plus two *problem*-class health signals:
+
+- `forecast_unavailable` — on when a safety-relevant forecast is missing:
+  either **no gust source answered** (all failed), in which case the awning is
+  kept in as a precaution regardless of sun, or the sunshine forecast is
+  missing (treated as not sunny). A present-but-low gust is trusted normally
+  and does **not** trigger this.
+- `gust_unknown` — the **hazardous half** of the above, on its own. A missing
+  sunshine forecast costs you shade; a missing gust forecast means wind safety
+  cannot be vouched for, and only this entity tells the two apart. It is what
+  makes `Awning unsafe` turn on when the sky is otherwise quiet.
 
 **Irradiance model sensors** (all read Unknown under the `sunshine` model,
 since nothing is being computed): `irradiance_window` (W/m² arriving on the
 window plane) is the weather input all three decisions use. `ghi` (global
 radiation as forecast), `diffuse_fraction` (what share is diffuse — high means
-overcast), `solar_elevation` (which gates the awning) and `sun_model` are
+overcast), `solar_elevation` (the sun's height, below which
+`min_solar_elevation` suppresses the direct beam) and `sun_model` are
 diagnostics.
 
 Solar *azimuth* is deliberately not published: `sun.sun` already provides it
@@ -377,6 +413,7 @@ whose state words are fixed by HA, not by this add-on:
 | Entity | States | Meaning |
 | --- | --- | --- |
 | `Forecast data` | OK / Problem | *Problem* = a safety-relevant forecast is missing (no gust source answered, or sunshine unknown) |
+| `Gust data` | OK / Problem | *Problem* = **no** gust source answered. Wind safety can't be vouched for, so `Awning unsafe` turns on |
 | `Radar data` | Connected / Disconnected | *Disconnected* = the radar was unreachable or the newest frame was too old to trust |
 
 They're named as subjects ("Forecast data") rather than conditions ("Forecast
@@ -394,12 +431,13 @@ under `fallback_only`; under `never` it's always Unknown.
 
 **Sensor vs Diagnostic.** Home Assistant splits entities into two groups.
 *Primary* entities (no category) are the ones you act on: the recommendation,
-the resulting awning/blind decisions, and the weather inputs that drive them
-(`Forecast gust`, `Forecast sunshine`, `Forecast temperature`, `Rain`, `Sun
-expected`, `Wind high`). *Diagnostic* entities describe how the add-on is
-working rather than the weather: provenance and health (`Forecast source`,
-`Radar age`, `Radar data`, `Forecast data`, `Shade reason`, `Last
-error`/`Last warning`, and the per-source gust breakdown). They appear in a
+the resulting awning/blind decisions, `Awning unsafe`, and the weather inputs
+that drive them (`Forecast gust`, `Forecast sunshine`, `Forecast temperature`,
+`Rain`, `Sun expected`, `Wind high`). *Diagnostic* entities describe how the
+add-on is working rather than the weather: provenance and health (`Forecast
+source`, `Radar age`, `Radar data`, `Forecast data`, `Gust data`, `Shade
+reason`, `Active error`/`Active warning`, and the per-source gust breakdown).
+They appear in a
 separate "Diagnostic" section on the device page and are the ones to check when
 something looks off, not for daily automations.
 
@@ -426,8 +464,8 @@ history.
 per new event rather than holding a value, and carry the text in a `message`
 attribute — so an automation is a plain trigger with no timestamp arithmetic
 (see Step 7). They stay silent for repeats of the same condition and across
-restarts. The `Last error` / `Last warning` sensors cover the other question —
-seeing at a glance *when* something last went wrong.
+restarts. The `Active error` / `Active warning` sensors cover the other
+question — seeing at a glance what is wrong *right now*, and since when.
 
 Each gust source is exposed as its own diagnostic sensor so you can see which
 one drove a retract: `sensor.swiss_meteo_shade_gust_official`,
@@ -451,13 +489,13 @@ triggers:
     entity_id: sensor.swiss_meteo_shade_shade_recommendation
     to: ["extend", "backup", "none"]   # real changes only, never attribute updates
   # A NEW hazard re-asserts the recommendation even when the recommendation
-  # itself does not change -- see "Manual overrides" below. Without these two,
-  # an awning you put back out by hand stays out when rain arrives.
+  # itself does not change -- see "Manual overrides" below. Without this, an
+  # awning you put back out by hand stays out when rain arrives.
+  # One trigger covers all three hazards: wind, rain, and every gust source
+  # failing. Do NOT substitute `rain_within_10_min` + `wind_high` -- that pair
+  # cannot see the gust fail-safe.
   - trigger: state
-    entity_id: binary_sensor.swiss_meteo_shade_rain_within_10_min
-    to: "on"
-  - trigger: state
-    entity_id: binary_sensor.swiss_meteo_shade_wind_high
+    entity_id: binary_sensor.swiss_meteo_shade_awning_unsafe
     to: "on"
   - trigger: homeassistant
     event: start                        # re-apply current state after a reboot
@@ -499,6 +537,15 @@ actions:
 > `homeassistant: start` trigger re-applies the right state after a reboot
 > instead of leaving whatever survived the restart.
 
+**This is the starting point, not the finished automation.** It shades from
+sunrise to sunset on a clear day, because the add-on has no idea which way your
+window faces, and its `default:` branch closes on `none` — including the
+`none` + `Awning unsafe` off case that the table above says may stay out. Two
+later sections refine exactly those two branches, on the *same* automation:
+*Only shade when the sun is actually on that window* adds the facade gate to
+the `extend` branch, and *Why the awning comes in before sunset* replaces
+`default:`. Work through both before leaving this running unattended.
+
 ### Manual overrides, and why the hazard triggers matter
 
 This add-on publishes *recommendations*; your automation moves the covers. It
@@ -506,22 +553,29 @@ has no idea what position they are actually in, so if you extend the awning by
 hand against a `backup` recommendation, nothing here fights you. That is
 deliberate — but it needs one safeguard.
 
-`retract` is true when **wind is high OR rain is coming**, and
-`Shade recommendation` collapses both into the same `backup` value. So if it is
-already `backup` because of wind and rain then arrives, the recommendation does
-**not** change — there is no state transition, and an automation watching only
-that sensor never re-fires. An awning you had manually put back out would sit
-there through the rain.
+`retract` is true when **wind is high OR rain is coming OR no gust source
+answered**, and `Shade recommendation` collapses all of them into the same
+`backup` value. So if it is already `backup` because of wind and rain then
+arrives, the recommendation does **not** change — there is no state transition,
+and an automation watching only that sensor never re-fires. An awning you had
+manually put back out would sit there through the rain.
 
-The `Rain within 10 min` and `Wind high` triggers close that hole: each new
-hazard re-runs the automation, which re-applies the current recommendation and
-brings the awning back in. Because they fire only on a hazard turning **on**,
-they don't nag you while conditions are merely unchanged — a manual override
-survives until something genuinely new shows up, and then safety wins.
+The `Awning unsafe` trigger closes that hole: each new hazard re-runs the
+automation, which re-applies the current recommendation and brings the awning
+back in. Because it fires only on the transition to **on**, it doesn't nag you
+while conditions are merely unchanged — a manual override survives until
+something genuinely new shows up, and then safety wins.
+
+> **Use `Awning unsafe`, not the component sensors.** Triggering on `Rain
+> within 10 min` and `Wind high` looks equivalent and is not: when every gust
+> source fails, `wind_high` stays **off** by design — an unknown gust must not
+> by itself force a retract — while `retract` goes **on**. Both component
+> triggers therefore stay quiet in exactly the situation the fail-safe exists
+> for, and the awning stays out. `Awning unsafe` is true for all three.
 
 If you would rather your manual override always stick until you undo it, drop
-those two triggers. Then nothing re-asserts until the recommendation itself
-changes — at the cost of the rain case above.
+that trigger. Then nothing re-asserts until the recommendation itself changes —
+at the cost of the rain case above.
 
 ### Only shade when the sun is actually on that window
 
@@ -571,25 +625,46 @@ that works in July can therefore leave a winter awning idle all day, because
 the sun never reaches that facade at all. That is usually the right outcome,
 and it is what `min_temp_c` is for anyway.
 
-Add the gate as conditions — for a **west-facing** awning:
+**Put the gate on the `extend` branch — not on the automation's `conditions:`.**
+This matters more than it looks; see the warning below. For a **west-facing**
+awning, the first branch of the `choose` in Step 7 becomes:
 
 ```yaml
-conditions:
-  - condition: numeric_state
-    entity_id: sun.sun
-    attribute: azimuth
-    above: 180          # sun has passed due south
-  - condition: numeric_state
-    entity_id: sun.sun
-    attribute: elevation
-    above: 5            # and is high enough to clear the neighbour's roof
+      # sunny and safe -- AND the sun is actually on this window
+      - conditions:
+          - condition: template
+            value_template: >-
+              {{ states('sensor.swiss_meteo_shade_shade_recommendation') == 'extend' }}
+          - condition: numeric_state
+            entity_id: sun.sun
+            attribute: azimuth
+            above: 180          # sun has passed due south
+          - condition: numeric_state
+            entity_id: sun.sun
+            attribute: elevation
+            above: 5            # and is high enough to clear the neighbour's roof
+        sequence:
+          - action: cover.open_cover
+            target: {entity_id: cover.terrace_awning}
+          - action: cover.open_cover
+            target: {entity_id: cover.backup_blind}
 ```
 
-> **Add matching triggers too, or it will not retract.** Conditions are only
-> examined when something already fired the automation. The recommendation
-> does not change as the sun moves, so without triggers on the same
-> thresholds the awning stays out long after the sun has left. For the
-> west-facing example, add both ends:
+Leave the `backup` branch and `default:` as they are. Now when the sun moves
+off the window the `extend` branch simply stops matching, `default:` runs, and
+the awning comes in.
+
+> **Why not the automation's `conditions:`.** It is the obvious place and it
+> quietly breaks the retract. A blanket `elevation above 5` condition is
+> evaluated on *every* run, including the run that fires **because** the sun
+> just dropped below 5 — so the condition fails, the automation stops before
+> its actions, and the awning is never closed. It stays out all night. On the
+> `extend` branch the same test does the right thing: failing it falls through
+> to `default:` instead of aborting the automation.
+
+> **Add matching triggers too.** Conditions are only examined when something
+> already fired the automation, and the recommendation does not change as the
+> sun moves. Without these, nothing re-evaluates when a threshold is crossed:
 >
 > ```yaml
 > triggers:
@@ -600,11 +675,17 @@ conditions:
 >   - trigger: numeric_state
 >     entity_id: sun.sun
 >     attribute: elevation
->     below: 5          # sun drops away again
+>     above: 5          # sun clears the obstruction
+>   - trigger: numeric_state
+>     entity_id: sun.sun
+>     attribute: elevation
+>     below: 0          # the day is over
 > ```
 >
-> Same principle as the hazard triggers above: whatever threshold you put in a
-> condition needs a trigger on it, or nothing re-evaluates when it is crossed.
+> Whatever threshold you put in a branch needs a trigger on it, or nothing
+> re-evaluates when it is crossed. If the sun leaves your facade well before it
+> sets — a south or south-east window — add a trigger on the azimuth at that
+> end too.
 
 **The numbers above are starting points, not your numbers.** Real facades are
 never exactly east or west, and a neighbouring roof, a tree, a balcony above,
@@ -616,6 +697,89 @@ those. A minimum `elevation` is usually worth keeping even when the azimuth
 range is right: very low sun is often blocked by whatever is on the horizon,
 and when it does get through, it comes in under an awning rather than being
 stopped by it.
+
+### Why the awning comes in before sunset — and what to do about it
+
+If your awning retracts while the sun is visibly still in the room, this is
+why. **MeteoSwiss reports 0 sunshine minutes for the hour containing sunset —
+on every day, including cloudless ones.** Sampled at Lucerne over a week of
+forecasts, with sunset around 20:37 local:
+
+| Hour (local) | Sunshine min | GHI W/m² | Sun elevation |
+| --- | --- | --- | --- |
+| 19:00–20:00 | 45 | 103 | 10.6° |
+| **20:00–21:00** | **0** | **8** | **1.1°** |
+
+That hour holds 39 minutes of sun, due west at azimuth 285–290°, straight into
+a west-facing room. The data is not wrong: sunshine duration counts only
+minutes with a direct beam above 120 W/m² (WMO), and below about 5° of
+elevation the air path is so long that even a cloudless sun falls under that
+line. It is still perfectly visible, and at that angle it reaches deepest into
+the room.
+
+**No setting fixes this.** The figure is exactly `0`, so no `sun_min_awning`
+above zero helps. The `irradiance` model doesn't rescue it either: GHI in those
+hours is 4–9 W/m², and since the direct beam is reconstructed from GHI minus
+diffuse *on a horizontal plane* — precisely where a 5° sun deposits nothing —
+the window figure computes to single digits. Both models measure radiative
+power, and the power genuinely is small. What you are reacting to is a low sun
+in your line of sight, which is geometry, not energy. On cloudier days the
+effect starts earlier: an hour reading 7–9 minutes falls under the default
+threshold of 20 and pulls the awning in around 19:00, an hour and a half before
+sunset.
+
+**The fix is one more refinement of the same automation: stop treating "not
+sunny" as a reason to close.** The add-on's sun verdict is a good *opening*
+signal — it knows about cloud, and `sun.sun` does not — but it is a poor
+*closing* signal at the edges of the day, because it reaches zero before the
+sun does. Let a hazard or the geometry end the day instead.
+
+Replace the `default:` branch from Step 7 with this:
+
+```yaml
+    # Not sunny -- but that alone is not a reason to close. Below ~5 deg the
+    # sunshine forecast reads 0 whatever the sky is doing, and the `extend`
+    # branch has already stopped matching, so without this the awning would
+    # come in with the sun still in the room. Close only for a real reason.
+    default:
+      - choose:
+          - conditions:
+              - condition: or
+                conditions:
+                  - condition: state          # any hazard
+                    entity_id: binary_sensor.swiss_meteo_shade_awning_unsafe
+                    state: "on"
+                  - condition: numeric_state  # the day is over
+                    entity_id: sun.sun
+                    attribute: elevation
+                    below: 0
+            sequence:
+              - action: cover.close_cover
+                target: {entity_id: cover.terrace_awning}
+      # the backup blind goes back up either way -- there is nothing to shade
+      - action: cover.open_cover
+        target: {entity_id: cover.backup_blind}
+```
+
+Read together with the `extend` branch, the three cases compose the way you
+want without any extra triggers or timers:
+
+| Sun elevation | `extend` branch | `default:` branch | Result |
+| --- | --- | --- | --- |
+| above `5` | matches — awning out | — | Shaded as usual |
+| `0`–`5` | fails (too low) | closes only on a hazard | **An awning already out stays out**; a closed one is not opened |
+| below `0` | fails | closes | Comes in at sunset |
+
+That middle row is the whole point. It defers the *closing* until the sun is
+genuinely down, without opening the awning fresh at 20:15 under a cloudy sky.
+If the sun leaves your facade before it sets, add the azimuth test to the same
+`or:` alongside the elevation one.
+
+**The cost, honestly:** on a genuinely overcast evening an awning that is
+already out now stays out for that last half hour instead of coming in. You
+lose a little fabric wear and nothing else — `Awning unsafe` is in the same
+`or:`, so wind, rain and a gust blackout still bring it in immediately, at any
+elevation.
 
 Alert when running on the unofficial fallback:
 
@@ -657,12 +821,12 @@ actions:
 Swap `event.swiss_meteo_shade_error` for `event.swiss_meteo_shade_warning` for
 the softer channel.
 
-The `Last error` / `Last warning` **sensors** carry the same information as a
-timestamp you can look at, which is handy on a dashboard — but don't build
-notifications on them. Their state is *when* the message first appeared, so an
-automation would have to work out for itself whether that timestamp is
-genuinely new; get it wrong and you are re-notified about an old error on
-every Home Assistant restart and every availability blip. The `event` entities
+The `Active error` / `Active warning` **sensors** read
+`"<what is wrong> since <when>"` while a fault is live and `none` once a cycle
+completes without it, which is what you want on a dashboard — but don't build
+notifications on them. They are *state*, not a feed: a fault that clears and
+returns looks like one value changing, and an automation would have to work out
+for itself whether it is seeing something genuinely new. The `event` entities
 exist precisely so you never have to write that logic.
 
 **Repeats don't re-notify.** An event fires only when the message is genuinely
@@ -670,10 +834,10 @@ new. A condition that persists for hours — a stale radar, a forecast stuck on
 its fallback — therefore notifies **once**, not every cycle. Every individual
 occurrence is still timestamped in the add-on **Log**.
 
-**A restart doesn't re-notify either.** The add-on remembers the last
-error/warning across restarts (they're persisted to `/data`), and on the first
-cycle after starting it only takes note of them — it never announces an event
-recorded before that run. Home Assistant also discards replayed retained
+**A restart doesn't re-notify either.** Events are not carried across restarts:
+reloading a fault recorded before a restart would claim one that may already be
+over. The first cycle after starting only takes note of what it finds, and
+never announces it as new. Home Assistant also discards replayed retained
 messages for `event` entities, and these are published non-retained anyway, so
 a reconnecting broker can't resurrect an old one.
 
@@ -781,8 +945,7 @@ SD-card wear on Raspberry-Pi installs despite polling every few minutes. The
 30 MB forecast files use conditional requests rather than re-downloading: the CDN
 (data.geo.admin.ch, S3/CloudFront) returns *304 Not Modified* with zero bytes
 when a file is unchanged — verified against the live service — so an unchanged
-32 MB forecast costs only the request round-trip. The `last_error` /
-`last_warning` diagnostics are persisted to `/data` so they survive a restart.
+32 MB forecast costs only the request round-trip.
 
 **Nowcast honesty.** The rain projection only advects when there is real echo
 to track. Phase correlation on a clear sky returns a large, random vector —

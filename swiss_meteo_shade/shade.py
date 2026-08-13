@@ -348,10 +348,18 @@ BINARY = [
     ("backup_blinds_close", "Backup blinds close", "backup_blinds_close", None),
     ("independent_blinds_close", "Independent blinds close",
      "independent_blinds_close", None),
+    # The single "the awning must come in" signal, true for EVERY hazard:
+    # wind, rain, and all gust sources failing. It deliberately crosses the
+    # recommendation enum -- it holds in `backup` (hazard while sunny) and in
+    # the hazardous half of `none` (hazard while not sunny) -- because an
+    # automation closing on `rain` and `wind_high` alone silently misses the
+    # gust fail-safe, and matching a set of enum values breaks whenever a
+    # value is added. Operational, not diagnostic: it drives covers.
+    ("retract", "Awning unsafe", "retract", None),
     ("rain", "Rain within 10 min", "rain", "moisture"),
     ("sun", "Sun expected", "sun", None),
     ("wind_high", "Wind high", "wind_high", None),
-    # These two use device_classes whose state WORDS are fixed by HA:
+    # These use device_classes whose state WORDS are fixed by HA:
     #   'problem'      always renders  OK / Problem      (on = problem)
     #   'connectivity' always renders  Connected / Disconnected  (on = connected)
     # So the name must be a SUBJECT, not a condition -- "Forecast data: OK"
@@ -359,6 +367,11 @@ BINARY = [
     # are ambiguous or inverted.
     ("forecast_unavailable", "Forecast data", "forecast_unavailable",
      "problem"),
+    # Splits the half of `forecast_unavailable` that is a HAZARD out from the
+    # half that is merely a loss of comfort information: a missing sunshine
+    # forecast keeps the awning in, a missing gust forecast means wind safety
+    # cannot be vouched for. The combined sensor cannot tell you which.
+    ("gust_unknown", "Gust data", "gust_unknown", "problem"),
     ("radar_ok", "Radar data", "radar_ok", "connectivity"),
 ]
 # (slug, friendly, state-key, unit-or-None, entity_category-or-None)
@@ -453,7 +466,7 @@ def announce_discovery(client):
         client.publish(f"homeassistant/{domain}/sms_{slug}/config",
                        json.dumps(cfg), retain=True, qos=1)
 
-    _diag_binary = {"forecast_unavailable", "radar_ok"}
+    _diag_binary = {"forecast_unavailable", "gust_unknown", "radar_ok"}
     for slug, name, key, dev_class in BINARY:
         cfg = {"name": name, "state_topic": _STATE_TOPIC,
                "value_template": "{{ 'ON' if value_json.%s else 'OFF' }}" % key}

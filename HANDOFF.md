@@ -161,6 +161,31 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   afternoon, 99 the next morning), so never assume a fixed length; always
   index by time from `graph['start']`.
 
+**`sre000h0` collapses to 0 before sunset — every day, clear or not**
+(probed 2026-08-14, point 604500, seven forecast days). The hour *containing*
+sunset reports **0 sunshine minutes** and GHI 4–9 W/m², while that hour still
+holds ~39 minutes of sun above the horizon. Sampled figures, sunset ~20:37
+local: 19:00–20:00 → 45 min / 103 W/m² at 10.6° elevation; 20:00–21:00 → 0 min
+/ 8 W/m² at 1.1°.
+
+The data is correct — sunshine duration counts only minutes with DNI ≥ 120 W/m²
+(WMO), and below ~5° elevation the air mass puts a cloudless sun under that
+line. Consequences, all confirmed:
+- **No threshold fixes it.** The value is exactly 0, so no `sun_min_awning`
+  above zero helps.
+- **The irradiance model does not rescue it.** DNI is reconstructed from
+  GHI − DHI on a *horizontal* plane, which is exactly where a 5° sun deposits
+  nothing; the window POA computes to single digits. Both models measure
+  radiative power, and the power really is small — the complaint is geometry
+  (a low sun deep in the room), which neither model represents.
+- On cloudier days it bites earlier: an hour reading 7–9 minutes is under the
+  default threshold of 20 and pulls the awning in around 19:00.
+
+This is **not fixable in the add-on** — it cannot know the facade. The README
+carries the automation pattern (hazards close the awning, `sun.sun` ends the
+day). Do not respond to a repeat report by adding a low-elevation option.
+`tools/` has no probe for this; the script lived in the scratchpad.
+
 **Open-Meteo**
 - Model `meteoswiss_icon_ch1`, field `wind_gusts_10m`, `forecast_days=2`,
   timezone UTC. Gust only.
@@ -178,6 +203,47 @@ These cost real effort to establish. Each was wrong-guessed at least once.
   one of the two per-source gust sensors always reads Unknown.
 - **Fail-safe on gust:** retract if *every* gust source fails. A present-but-low
   gust is trusted.
+- **`retract` is an entity (`Awning unsafe`), never a fourth `recommendation`
+  value** (1.7.0). It was asked for as an enum state — "unconditional vs
+  optional retract" — and a binary sensor is the right shape for three reasons,
+  in descending order of importance:
+  1. It **crosses** the enum. `retract` is true in `backup` *and* in the
+     hazardous half of `none`, so as an enum member every consumer would write
+     `state in ('backup', 'retract')`, and adding any future value would break
+     each of those conditions silently.
+  2. A new enum value is a **silent safety regression** for anyone installed:
+     `recommendation == none` → close is safe today; carve `retract` out of
+     `none` and that condition stops matching the hazard case. Adding an entity
+     breaks nothing.
+  3. `retract` was already in the published state JSON — only the discovery
+     entry was missing, so it was one line in `BINARY`.
+
+  The gap it closes is real and was in our own README: an automation triggering
+  on `Rain within 10 min` + `Wind high` **cannot see the gust fail-safe**.
+  `_wind_high` returns False when `gust_kmh is None` (deliberate — an unknown
+  gust must not by itself force retract), so with every gust source down both
+  component sensors stay off while `retract` is on. `test_entities.py` pins
+  this; if that test ever passes vacuously the gap has moved.
+- **`none` was ambiguous and is no longer.** It meant both "nothing to shade,
+  nothing dangerous" and "not sunny AND a hazard". `Awning unsafe` is the
+  discriminator; the README carries the 2×2 table. Do not "fix" this again by
+  splitting the enum.
+- **Sun gates belong on the `extend` BRANCH, never in the automation's
+  `conditions:`** (1.7.0). The README shipped the wrong version for four
+  releases. A blanket `elevation above 5` condition is evaluated on the very
+  run that fires *because* elevation crossed below 5, so it fails, the
+  automation aborts before its actions, and the awning is never closed — it
+  stays out overnight. On the branch, failing the same test falls through to
+  `default:` instead. The README's own "add matching triggers" callout made it
+  worse by guaranteeing the doomed run happened.
+- **README automations are ONE automation, refined section by section.** Step 7
+  gives the base; later sections replace named branches of it. Do not add a
+  second standalone `alias:` — a reader who pastes both gets two automations
+  firing on the same events with opposite outcomes. This was nearly shipped in
+  1.7.0 and caught on review.
+- **"Not sunny" is not a reason to close the awning.** Only a hazard or the sun
+  actually being down is. See the `sre000h0` verified fact above for why: the
+  sun signal reaches zero up to 90 minutes before the sun does.
 - `lookahead_hours`' window is always "now − 1h" to "now + lookahead_hours" —
   it **always** includes the current hour no matter how small the setting is.
   Shrinking it doesn't filter a bad *current*-hour forecast; it only reduces
@@ -497,12 +563,15 @@ config changes came out of the investigation:
 
 ## Current state
 
-- 29 MQTT entities. Operational: recommendation, the three shade decisions, and
-  the weather inputs. Diagnostic: source, radar age, radar/forecast health,
-  reason, last error/warning, per-source gusts.
+- 31 MQTT entities. Operational: recommendation, the three shade decisions,
+  `Awning unsafe`, and the weather inputs. Diagnostic: source, radar age,
+  radar/forecast/gust health, reason, active error/warning, per-source gusts.
 - 23 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 25 logic + 5 events + 7 event-entity + 5 radar + 6 imports/manifest + 4 options + 5 forecast + 9 device-link, all passing; no external deps beyond
-  numpy for the radar ones.
+- Tests: 131 across 13 files, all passing; no external deps beyond numpy for
+  the radar ones and astral for the solar ones. `test_entities.py` also carries
+  the **manifest guard**: every state-key declared in `BINARY`/`SENSORS` must
+  exist in the dict `evaluate()` returns, because a typo there publishes an
+  entity that reads Unknown forever and nothing else notices.
 - `DOCS.md` is a symlink to `README.md` (install page and Documentation tab
   content, kept identical structurally rather than by manual duplication).
 - `CHANGELOG.md` exists and is shown in the Supervisor's Changelog tab. Add an
