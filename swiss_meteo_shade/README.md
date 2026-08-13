@@ -369,6 +369,21 @@ Shade* with all entities (below).
 
 ## Entities
 
+> **Check your own entity IDs before writing automations.** The IDs below are
+> what a fresh install usually generates, but they are **not** guaranteed.
+> Home Assistant assigns an entity_id **once**, when it first sees the entity,
+> and then keeps it forever — while the *friendly name* is re-read from this
+> add-on on every reconnect. So a renamed entity keeps its original ID, and the
+> two can disagree permanently. One observed instance carries
+> `binary_sensor.swiss_meteo_shade_awning_retract` with the friendly name
+> *Swiss Meteo Shade Awning unsafe*.
+>
+> Open **Developer Tools → States**, filter on `swiss_meteo_shade`, and use
+> what you actually see. If you would rather have them match, Settings →
+> Devices & Services → Entities → *(pick one)* → **Entity ID** lets you rename
+> the ID — but nothing needs it, and renaming breaks any automation already
+> pointing at the old one.
+
 **Controls (binary):**
 
 | Entity | On when |
