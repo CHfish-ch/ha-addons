@@ -30,35 +30,99 @@ import json
 import os
 from datetime import datetime, timezone
 
-# Active event of each level: {"message", "time", "last_seen", "count"}|None.
-# `time` is when the CURRENT message first appeared, not when it last recurred.
-_last = {"error": None, "warning": None}
+_LEVELS = ("error", "warning")
 
-# Did this cycle emit anything at each level? A cycle that emits nothing means
-# the condition has cleared, which is the only "resolved" signal available --
-# the code is told when things go wrong, never when they come right.
-_this_cycle = {"error": False, "warning": False}
+# EVERY condition active this cycle, message -> {"message","time","last_seen",
+# "count"}, in the order they were reported. `time` is when that particular
+# message first appeared, not when it last recurred.
+#
+# Tracking a SET rather than a single latest event is the whole point. Holding
+# only the newest looks fine while one thing is broken and collapses when
+# several are: with four conditions reported per cycle, each one differs from
+# the single stored predecessor, so all four read as new every cycle forever.
+# An internet outage produces exactly that -- radar, precipitation, radiation
+# and gust all fail together -- and it billed roughly forty notifications an
+# hour on 2026-08-14 before this was fixed.
+_active = {level: {} for level in _LEVELS}
+
+# What was active in the PREVIOUS cycle, so a returning condition can keep its
+# original `time` and a genuinely new one can be told apart.
+_prev = {level: {} for level in _LEVELS}
+
+# Conditions that became active THIS cycle. These, and only these, fire the
+# `event` entities.
+_new = {level: [] for level in _LEVELS}
 
 
 def start_cycle():
     """Begin a fresh cycle. Anything not re-reported this cycle is resolved.
 
-    Two separate jobs, and conflating them costs a cycle of lag:
+    The code is told when things go wrong and never when they come right, so
+    "absent from a whole cycle" is the only resolved signal available.
 
-    * `_this_cycle` is reset here and read by `snapshot`/`state_text`, so a
-      cycle that reports nothing shows clear IMMEDIATELY -- not one cycle
-      later.
-    * `_last` is dropped only once a whole cycle has passed without the fault.
-      That way a fault returning after a clean spell is a NEW occurrence with
-      a NEW `time`: it reads "since <the recurrence>" rather than pointing at
-      one that already ended, and the event entity fires for it again.
+    Carrying the previous cycle's records forward is what keeps `time` stable
+    across a sustained fault while still giving a NEW time to one that returns
+    after a clean spell -- it then reads "since <the recurrence>" instead of
+    pointing at an occurrence that already ended, and fires again.
     """
-    for level in ("error", "warning"):
-        if not _this_cycle[level]:
-            _last[level] = None
-        _this_cycle[level] = False
+    for level in _LEVELS:
+        _prev[level] = _active[level]
+        _active[level] = {}
+        _new[level] = []
 
 
+
+
+def collapse_warnings(message, detail=None):
+    """Replace every active warning with a single one, and return it.
+
+    For a cycle whose warnings are all consequences of ONE upstream fact --
+    the add-on has no working internet, so radar, precipitation, gust and
+    sunshine all fail together. Reporting four is technically true and
+    practically useless: it says four things broke when one did, and the
+    "(+3 more)" suffix leaves the reader hunting for what they missed.
+
+    Every individual warning has ALREADY been printed to the Log by the time
+    this runs, so nothing is lost -- the Log keeps the full picture and the
+    sensor carries the one fact worth acting on.
+
+    The collapsed record keeps the earliest `time` of the warnings it
+    replaces, so "since" points at when the outage started rather than when it
+    was recognised, and it survives across cycles like any other condition.
+    """
+    level = "warning"
+    recs = list(_active[level].values())
+    if not recs:
+        return None
+    message = str(message)
+    now = datetime.now(timezone.utc).isoformat()
+    prev = _prev[level].get(message)
+    if prev is not None:                     # the same outage, still going
+        rec = prev
+        rec["last_seen"] = now
+        rec["count"] = int(rec.get("count", 1)) + 1
+        _new[level] = []
+    else:
+        rec = {"message": message,
+               "time": min(r["time"] for r in recs),
+               "last_seen": now, "count": 1}
+        _new[level] = [rec]                  # one notification, not four
+    _active[level] = {message: rec}
+    line = f"{now} WARNING: {message}"
+    if detail:
+        line += f" -- {detail}"
+    print(line, flush=True)
+    return rec
+
+
+def reset():
+    """Forget everything. For tests: this module is process-global state, and
+    a condition left active by one test reads as "still going" in the next,
+    which silently turns a should-fire assertion into a no-fire."""
+    for level in _LEVELS:
+        _active[level] = {}
+        _prev[level] = {}
+        _new[level] = []
 
 
 def _record(level, message, detail=None):
@@ -84,15 +148,21 @@ def _record(level, message, detail=None):
     """
     now = datetime.now(timezone.utc).isoformat()
     message = str(message)
-    _this_cycle[level] = True
-    prev = _last[level]
-    repeat = bool(prev and prev.get("message") == message)
-    if repeat:
-        prev["last_seen"] = now
-        prev["count"] = int(prev.get("count", 1)) + 1
+    rec = _active[level].get(message)
+    if rec is not None:                      # reported twice in one cycle
+        rec["last_seen"] = now
+        rec["count"] = int(rec.get("count", 1)) + 1
     else:
-        _last[level] = {"message": message, "time": now,
-                        "last_seen": now, "count": 1}
+        rec = _prev[level].get(message)
+        if rec is not None:                  # still going: keep its `time`
+            rec["last_seen"] = now
+            rec["count"] = int(rec.get("count", 1)) + 1
+            _active[level][message] = rec
+        else:                                # genuinely new
+            rec = {"message": message, "time": now,
+                   "last_seen": now, "count": 1}
+            _active[level][message] = rec
+            _new[level].append(rec)
     line = f"{now} {level.upper()}: {message}"
     if detail:
         line += f" -- {detail}"
@@ -107,32 +177,68 @@ def warn(message, detail=None):
     _record("warning", message, detail)
 
 
+def _latest(level):
+    """The most recently reported ACTIVE event of this level, or None.
+
+    Latest rather than oldest so a single sensor still tracks the newest thing
+    to go wrong, which is what it did when only one event was kept.
+    """
+    recs = list(_active[level].values())
+    return recs[-1] if recs else None
+
+
+def active(level):
+    """Every condition currently active at this level, in report order."""
+    return list(_active[level].values())
+
+
+def new_events(level):
+    """Conditions that became active THIS cycle -- the ones worth announcing.
+
+    One entry per newly-active condition, so four simultaneous failures fire
+    four events ONCE, rather than the same four every cycle until they clear.
+    """
+    return list(_new[level])
+
+
 def last_error():
-    return _last["error"]
+    return _latest("error")
 
 
 def last_warning():
-    return _last["warning"]
+    return _latest("warning")
 
 
 def state_text(level):
-    """"<message> since <when>", or "none" when nothing is wrong."""
-    ev = _last[level] if _this_cycle[level] else None
+    """"<message> since <when>", or "none" when nothing is wrong.
+
+    With several conditions active the newest is shown and the rest are
+    counted: one sensor cannot carry four messages inside Home Assistant's
+    255-character state limit, and the `event` entities have already announced
+    each of them individually.
+    """
+    ev = _latest(level)
     if not ev:
         return "none"
     try:
         stamp = datetime.fromisoformat(ev["time"]).strftime("%Y-%m-%d %H:%M") + "Z"
     except (ValueError, TypeError):
         stamp = ev["time"]
-    return f"{ev['message']} since {stamp}"[:255]   # HA caps states at 255
+    text = f"{ev['message']} since {stamp}"
+    others = len(_active[level]) - 1
+    if others > 0:
+        text += f" (+{others} more)"
+    return text[:255]   # HA caps states at 255
 
 
 def snapshot():
-    """Return the two ACTIVE events for inclusion in the published state.
+    """Return the ACTIVE events for inclusion in the published state.
 
-    Gated on this cycle so the attributes agree with the state text: a clean
-    cycle reports nothing rather than leaving a resolved fault visible.
+    `last_error`/`last_warning` stay single records for backwards
+    compatibility with the sensor attributes; `active_*_count` says how many
+    conditions are really live so a dashboard is not misled by seeing one.
     """
-    return {"last_error": _last["error"] if _this_cycle["error"] else None,
-            "last_warning": (_last["warning"] if _this_cycle["warning"]
-                             else None)}
+    return {"last_error": _latest("error"),
+            "last_warning": _latest("warning"),
+            "active_error_count": len(_active["error"]),
+            "active_warning_count": len(_active["warning"])}

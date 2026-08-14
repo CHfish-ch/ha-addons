@@ -12,10 +12,7 @@ import events
 
 
 def setup_function():
-    events._last["error"] = None
-    events._last["warning"] = None
-    events._this_cycle["error"] = False
-    events._this_cycle["warning"] = False
+    events.reset()
 
 
 def test_records_latest_warning():
@@ -41,9 +38,22 @@ def test_error_and_warning_independent():
 def test_snapshot_shape():
     events.error("x")
     snap = events.snapshot()
-    assert set(snap) == {"last_error", "last_warning"}
+    assert set(snap) == {"last_error", "last_warning",
+                         "active_error_count", "active_warning_count"}
     assert snap["last_error"]["message"] == "x"
     assert snap["last_warning"] is None                   # none yet
+    assert snap["active_error_count"] == 1
+    assert snap["active_warning_count"] == 0
+
+
+def test_snapshot_counts_every_active_condition():
+    """The single `last_*` record cannot show that four things are broken;
+    the count is what stops a dashboard reading one and assuming that's all."""
+    for m in ("a", "b", "c", "d"):
+        events.warn(m)
+    snap = events.snapshot()
+    assert snap["active_warning_count"] == 4
+    assert snap["last_warning"]["message"] == "d"         # newest is shown
 
 
 def test_none_when_empty():

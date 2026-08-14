@@ -308,8 +308,25 @@ def latest_rzc_assets(count=3, session=None):
     if dated:
         return _extend(s, dated, count)
 
+    raise _no_files_error(diag, found)
+
+
+def _no_files_error(diag, found):
+    """The right diagnosis for "no frames", which is two different faults.
+
+    "We could not reach MeteoSwiss" and "we reached it and the files are not
+    what we expect" used to raise the SAME message -- one that led with
+    `RZC_PREFIX` and sent a 2026-08-14 home-internet outage off hunting
+    through the STAC catalogue for a renamed product. The prefix hypothesis is
+    only worth raising when we actually saw a listing.
+    """
+    if diag and all("unreachable" in d for d in diag):
+        return RuntimeError(
+            f"radar unreachable -- no network path to MeteoSwiss. "
+            f"Checked {' | '.join(diag)}")
+
     prefixes = sorted({n[:3].lower() for n in found if n.lower().endswith(".h5")})
-    raise RuntimeError(
+    return RuntimeError(
         f"No '{RZC_PREFIX}' files found. Checked {' | '.join(diag)}. "
         f"Prefixes present: {prefixes or 'none'}. "
         f"If the product prefix changed, update RZC_PREFIX.")

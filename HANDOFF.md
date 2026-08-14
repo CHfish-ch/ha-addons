@@ -66,7 +66,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.7.1. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.7.2. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -107,8 +107,9 @@ there are conditions where neither fires (intended).
   plus the conditional-GET cache.
 - `logic.py` — pure decision function, no I/O, fully unit-testable.
 - `radar.py` — RZC composite → rain now/+5/+10 via Lagrangian persistence.
-- `events.py` — records the ACTIVE error/warning for two diagnostic sensors;
-  clears after a cycle completes without the fault, and is not persisted.
+- `events.py` — records the ACTIVE SET of errors/warnings for two diagnostic
+  sensors; clears after a cycle completes without the fault, and is not
+  persisted. `new_events()` drives the `event` entities.
 
 ## Verified facts — probed against live endpoints, do NOT re-guess
 
@@ -243,6 +244,37 @@ day). Do not respond to a repeat report by adding a low-elevation option.
   second standalone `alias:` — a reader who pastes both gets two automations
   firing on the same events with opposite outcomes. This was nearly shipped in
   1.7.0 and caught on review.
+- **`publish_state` publishes STATE BEFORE AVAILABILITY, and that is
+  load-bearing** (1.7.2). In a total outage `healthy` is false, so availability
+  turns the operational entities `unavailable` — while the same cycle's
+  decision is `retract: true` because both fail-safes fired. State-first means
+  Home Assistant processes `Awning unsafe` → on, runs the automation, and only
+  then marks it unavailable. Availability-first means the entity is already
+  unavailable when the state lands, the transition never becomes visible, and
+  the fail-safe silently never reaches the covers. Confirmed working against a
+  real outage on 2026-08-14. `test_entities.py` pins the order; swapping the
+  two lines fails it.
+- **Report the CAUSE, not the symptoms.** Losing internet fails radar,
+  precipitation, gust and sunshine together; four warnings for one fact is
+  noise. `evaluate()` detects "nothing at all answered" and calls
+  `events.collapse_warnings()`. Two things make it honest: it is inferred from
+  the attempts already made rather than by probing a third-party host (a probe
+  is one more request that can fail for its own reasons), and a radar that
+  answers with a STALE frame counts as REACHABLE -- otherwise a MeteoSwiss-side
+  outage gets misreported as the user's network. `radar_reachable` is that
+  distinction; do not collapse it back into `radar_ok`.
+- **Never hide a warning without leaving a way to see it.** The collapsed
+  set stays in the Log, and `active_warnings` / `active_errors` ride on the
+  events topic as attributes, so a "(+n more)" on the sensor is answerable
+  inside Home Assistant.
+- **Dedup must track a SET of active conditions, never the latest one**
+  (1.7.2). Holding a single latest event looks fine while one thing is broken
+  and collapses when several are: each of four concurrent warnings differs
+  from the single stored predecessor, so all four re-fire every cycle. Ten
+  cycles of one outage produced 31 events under the old scheme and 4 under the
+  new. `events.new_events(level)` is the only correct input to the `event`
+  entities — do not go back to inferring newness from a timestamp field in the
+  state, because that field can only ever represent one condition.
 - **Two different stores, and they are constantly confused** (1.7.1):
   - a **retained discovery config** lives on the *broker*. Publishing the
     current set never removes an old one — only an empty retained payload
@@ -603,7 +635,7 @@ config changes came out of the investigation:
   `Awning unsafe`, and the weather inputs. Diagnostic: source, radar age,
   radar/forecast/gust health, reason, active error/warning, per-source gusts.
 - 23 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 140 across 14 files, all passing; no external deps beyond numpy for
+- Tests: 157 across 14 files, all passing; no external deps beyond numpy for
   the radar ones and astral for the solar ones. `test_entities.py` also carries
   the **manifest guard**: every state-key declared in `BINARY`/`SENSORS` must
   exist in the dict `evaluate()` returns, because a typo there publishes an

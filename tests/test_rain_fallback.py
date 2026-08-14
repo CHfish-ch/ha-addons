@@ -31,8 +31,7 @@ def setup_function():
     # Dedup is global and persists between tests: without this, a test that
     # emits the same warning as an earlier one sees no timestamp change and
     # reads that as a failure to announce.
-    events._last["error"] = None
-    events._last["warning"] = None
+    events.reset()
     shade.SUN_MODEL = "sunshine"
     shade.SUN_MIN_AWNING = shade.SUN_MIN_BACKUP = shade.SUN_MIN_INDEPENDENT = 20
     shade.MIN_TEMP_C = None
@@ -62,6 +61,11 @@ def _precip(result):
         CALLS.append("precip")
         return result
     forecast.precipitation_now = fake
+
+
+def _raises(session=None):
+    CALLS.append("radar")
+    raise RuntimeError("radar STAC unreachable: ConnectionError")
 
 
 def test_working_radar_never_consults_the_forecast():
@@ -138,6 +142,58 @@ def test_a_persistent_outage_warns_once_not_every_cycle():
     assert len(stamps) == 1, \
         f"a sustained outage re-fired {len(stamps)} times"
 
+
+
+# --- recognising a total outage ---------------------------------------------
+def _dead_forecast():
+    forecast.gather = lambda *a, **k: {
+        "forecast_source": None, "gust_sources": {}, "gust_kmh": None,
+        "sunshine": None, "sunshine_minutes": None, "temp_c": None,
+        "on_backup": False, "openmeteo_ok": False}
+
+
+def test_a_total_outage_reports_one_cause_not_four():
+    """The 2026-08-14 internet outage: radar, precipitation, gust and sunshine
+    all fail from ONE cause, and saying it four times says four things broke."""
+    radar.evaluate = _raises
+    _precip(None)
+    _dead_forecast()
+    shade.evaluate()
+    active = [r["message"] for r in events.active("warning")]
+    assert active == ["no internet connection -- no data source could be reached"], \
+        f"expected one collapsed warning, got {active}"
+
+
+def test_a_reachable_but_stale_radar_is_not_called_an_outage():
+    """A stale frame means MeteoSwiss ANSWERED. Blaming the network then would
+    send the reader to their router while the real fault is upstream."""
+    _radar(ok=False)                 # stale, not an exception
+    _precip(None)
+    _dead_forecast()
+    shade.evaluate()
+    active = [r["message"] for r in events.active("warning")]
+    assert not any("no internet" in m for m in active), \
+        f"claimed an outage while the radar was reachable: {active}"
+
+
+def test_a_partial_failure_keeps_its_specific_warning():
+    """Radar down but the forecast answering is NOT an outage, and collapsing
+    it would hide which source actually failed."""
+    radar.evaluate = _raises
+    _precip({"mm": 0.0, "sources": {"official": 0.0}})
+    shade.evaluate()                 # gather still returns the official source
+    active = [r["message"] for r in events.active("warning")]
+    assert active and not any("no internet" in m for m in active), active
+
+
+def test_the_full_warning_set_travels_as_an_attribute():
+    """So a "(+n more)" on the sensor is answerable inside Home Assistant."""
+    radar.evaluate = _raises
+    _precip({"mm": 0.0, "sources": {"official": 0.0}})
+    st = shade.evaluate()
+    assert isinstance(st["active_warnings"], list) and st["active_warnings"]
+    assert st["active_warnings"] == [r["message"]
+                                     for r in events.active("warning")]
 
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]

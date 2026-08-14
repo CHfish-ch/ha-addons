@@ -172,6 +172,10 @@ def _events_state():
         "last_warning_message": warn["message"] if warn else "none",
         "last_warning_count": warn.get("count", 1) if warn else 0,
         "last_warning_seen": warn.get("last_seen") if warn else None,
+        # The full sets, so a "(+3 more)" on the sensor is answerable in Home
+        # Assistant instead of sending the reader to the add-on Log.
+        "active_errors": [r["message"] for r in events.active("error")],
+        "active_warnings": [r["message"] for r in events.active("warning")],
     }
 
 
@@ -190,6 +194,7 @@ def evaluate(session=None, prev_wind_high=False):
     rain_source = "radar"
     rain_sources = {}
     radar_why = None            # why the radar is out, for the ONE warning
+    radar_reachable = True      # did we get an answer at all, stale or not
     try:
         rad = radar.evaluate(session=session)
         if rad.get("stale"):
@@ -203,6 +208,9 @@ def evaluate(session=None, prev_wind_high=False):
     except Exception as exc:
         rad, radar_ok = {}, False
         radar_why = f"{type(exc).__name__}: {exc}"
+        # A stale frame still means we REACHED MeteoSwiss; an exception here
+        # means we did not. Only the latter counts toward "no connectivity".
+        radar_reachable = False
 
     # ONE warning for one condition. Emitting a "radar is stale" warning here
     # and a "using the forecast" warning below would ALTERNATE, and since only
@@ -261,8 +269,13 @@ def evaluate(session=None, prev_wind_high=False):
             # event entity) and `Sun model` reports `sunshine_fallback`, so
             # the entities still explain themselves.
             sun_model_active = "sunshine_fallback"
-            events.warn("radiation forecast unavailable -> falling back to "
-                        "the sunshine model (thresholds sun_min_*)")
+            # Only worth saying when there is something to fall back TO. In a
+            # total outage the sunshine forecast is equally dead, and
+            # announcing a fallback to it is a fourth warning that describes
+            # nothing the other three have not already said.
+            if fc.get("sunshine") is not None:
+                events.warn("radiation forecast unavailable -> falling back "
+                            "to the sunshine model (thresholds sun_min_*)")
 
     # 3. decision (with hysteresis + temp gate)
     _sun_a, _sun_b, _sun_i = _sun_flags(fc, irr, sun_model_active)
@@ -288,6 +301,22 @@ def evaluate(session=None, prev_wind_high=False):
             events.warn("all gust sources failed -> awning kept in (fail-safe)")
         else:
             events.warn("sunshine forecast unavailable this cycle")
+
+    # Nothing at all answered: not the radar, not the precipitation fallback,
+    # not either forecast source. That is one fact -- no working internet --
+    # and reporting it as four separate failures says four things broke when
+    # one did. Inferred from the attempts already made rather than by probing
+    # some third-party host: a probe is another request that can fail for its
+    # own reasons, and these four attempts are better evidence than one ping.
+    # Each individual warning is already in the Log; only the sensor collapses.
+    no_connectivity = (not radar_reachable
+                       and rain_source == "assumed"
+                       and fc.get("forecast_source") is None)
+    if no_connectivity:
+        events.collapse_warnings(
+            "no internet connection -- no data source could be reached",
+            detail=f"radar: {radar_why}; forecast and precipitation also "
+                   f"unreachable. Individual failures are logged above.")
 
     # a cycle is "healthy" if the decision rests on real data: radar known
     # (rain) OR at least the forecast produced a sunshine/gust signal
@@ -574,51 +603,51 @@ def retire_orphan_discovery(client):
     return gone
 
 
-_event_seen = {"error": None, "warning": None}
-_event_seeded = False
+def _publish_new_events(client):
+    """Fire the `event` entities, once per condition that became active.
 
-# (event_type, state key holding its timestamp, state key holding its message,
-#  topic to fire on)
-_EVENT_FIELDS = (
-    ("error", "last_error_time", "last_error_message", _EVENT_ERROR_TOPIC),
-    ("warning", "last_warning_time", "last_warning_message",
-     _EVENT_WARNING_TOPIC),
-)
+    Driven by `events.new_events()` rather than by a changing timestamp. The
+    timestamp approach only ever saw the single newest event, so several
+    conditions failing together each looked new on every cycle -- during an
+    internet outage, four notifications every five minutes, indefinitely.
+    Asking the recorder which conditions are NEW makes the count fall out of
+    the data instead of being inferred from one field.
 
-
-def _publish_new_events(client, state):
-    """Fire the `event` entities, but only for genuinely NEW events.
-
-    The timestamp is when the CURRENT message first appeared, so an unchanged
-    timestamp means the same condition is merely recurring and must not fire
-    again -- a stale radar lasting hours notifies once, as with the sensors.
-
-    The first publish after a start only SEEDS the tracker and fires nothing:
-    events.py restores the last error/warning from /data, and announcing those
-    would re-report something from before this run every time the add-on
-    restarts. That is the exact trap the sensor-based automation needed a
-    hand-written template condition to avoid.
+    Nothing is seeded or suppressed on the first cycle. Events are no longer
+    persisted across restarts (1.5.2), so a fault seen on the first cycle of
+    this run is genuinely current and worth announcing; skipping it meant a
+    sustained fault present at startup was NEVER reported, because it also
+    never changed afterwards.
     """
-    global _event_seeded
-    if not _event_seeded:
-        for kind, tkey, _mkey, _topic in _EVENT_FIELDS:
-            _event_seen[kind] = state.get(tkey)
-        _event_seeded = True
-        return
-    for kind, tkey, mkey, topic in _EVENT_FIELDS:
-        stamp = state.get(tkey)
-        if not stamp or stamp == _event_seen[kind]:
-            continue
-        _event_seen[kind] = stamp
-        client.publish(topic, json.dumps({
-            "event_type": kind,
-            "message": state.get(mkey),
-            "time": stamp,
-        }), retain=False, qos=1)      # never retained: no replay on reconnect
+    for kind, topic in (("error", _EVENT_ERROR_TOPIC),
+                        ("warning", _EVENT_WARNING_TOPIC)):
+        for ev in events.new_events(kind):
+            client.publish(topic, json.dumps({
+                "event_type": kind,
+                "message": ev["message"],
+                "time": ev["time"],
+            }), retain=False, qos=1)  # never retained: no replay on reconnect
 
 
 def publish_state(client, state):
-    """Publish one state + availability, waiting for delivery (QoS 1)."""
+    """Publish one state + availability, waiting for delivery (QoS 1).
+
+    ORDER IS LOAD-BEARING: the state goes out BEFORE the availability. Do not
+    swap these two lines.
+
+    When every source fails, `healthy` is False and the availability turns the
+    operational entities `unavailable` in Home Assistant -- but the decision
+    that same cycle is `retract: true`, because both fail-safes have fired.
+    Publishing the state first means Home Assistant processes the transition
+    to `on` and runs any automation watching it, and only then marks the
+    entity unavailable. Reverse the order and the entity is already
+    unavailable when the state lands, so the transition never becomes visible
+    and the fail-safe silently never reaches the covers.
+
+    Observed working on 2026-08-14: a home internet outage took every source
+    down, `Awning unsafe` turned on, the awning came in, and the entity went
+    unavailable immediately afterwards.
+    """
     info1 = client.publish(_STATE_TOPIC, json.dumps(state), retain=True, qos=1)
     online = "online" if state.get("healthy") else "offline"
     info2 = client.publish(_AVAIL_TOPIC, online, retain=True, qos=1)
@@ -629,8 +658,12 @@ def publish_state(client, state):
     # cycles mean Home Assistant registers no change at all, so an ongoing
     # condition never produces a repeat notification. Every occurrence is still
     # visible, with its own timestamp, in the add-on Log.
+    # `active_errors`/`active_warnings` are lists, and change only when the SET
+    # of live conditions changes -- which is a real change worth seeing, not
+    # the per-cycle churn `count`/`last_seen` would cause.
     _stable = ("last_error_message", "last_error_time",
-               "last_warning_message", "last_warning_time")
+               "last_warning_message", "last_warning_time",
+               "active_errors", "active_warnings")
     events_payload = {k: state.get(k) for k in _stable}
     info3 = client.publish(_EVENTS_TOPIC, json.dumps(events_payload),
                            retain=True, qos=1)
@@ -641,7 +674,7 @@ def publish_state(client, state):
             pass
     # after the state is on the wire, so an automation reacting to the event
     # sees the matching sensor values already updated
-    _publish_new_events(client, state)
+    _publish_new_events(client)
 
 
 if __name__ == "__main__":

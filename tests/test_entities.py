@@ -160,6 +160,28 @@ def test_unsafe_is_operational_and_gust_data_is_diagnostic():
         gust["availability_topic"] == cfg["sms_radar_ok"]["availability_topic"]
 
 
+def test_state_is_published_before_availability():
+    """ORDER IS LOAD-BEARING and nothing else would catch a swap.
+
+    In a total outage `healthy` is False, so availability turns the
+    operational entities unavailable -- while that same cycle's decision is
+    `retract: true`, both fail-safes having fired. State first means Home
+    Assistant sees `Awning unsafe` turn ON and runs the automation, then marks
+    it unavailable. Availability first means the entity is already unavailable
+    when the state lands, the transition is never visible, and the fail-safe
+    never reaches the covers. Verified against a real outage on 2026-08-14.
+    """
+    c = FakeClient()
+    shade.publish_state(c, {"healthy": False, "retract": True,
+                            "recommendation": "none"})
+    topics = [p["topic"] for p in c.published]
+    assert shade._STATE_TOPIC in topics and shade._AVAIL_TOPIC in topics
+    assert topics.index(shade._STATE_TOPIC) < topics.index(shade._AVAIL_TOPIC), \
+        "availability published before state: the fail-safe becomes invisible"
+    avail = next(p for p in c.published if p["topic"] == shade._AVAIL_TOPIC)
+    assert avail["payload"] == "offline", "unhealthy cycle must go offline"
+
+
 def test_gust_data_reads_as_a_subject_not_a_condition():
     """device_class 'problem' renders OK / Problem, so the name must be a
     subject -- 'Gust missing: OK' would be unreadable."""

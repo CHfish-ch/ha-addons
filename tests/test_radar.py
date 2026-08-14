@@ -116,6 +116,39 @@ def test_motion_spread_is_recorded_for_coherent_and_incoherent_fields():
         radar.phase_correlate, radar._has_echo = real_pc, real_echo
 
 
+
+def test_a_network_outage_is_not_blamed_on_the_product_prefix():
+    """During a 2026-08-14 home-internet outage the add-on reported
+    "No 'rzc' files found ... If the product prefix changed, update
+    RZC_PREFIX" -- pointing at a MeteoSwiss schema change when the real cause
+    was DNS. Leading with the wrong hypothesis costs an hour of the reader's
+    time, so the prefix advice is only offered when a listing was actually
+    seen."""
+    err = radar._no_files_error(
+        ["20260814-ch=radar STAC unreachable: ConnectionError",
+         "20260813-ch=radar STAC unreachable: ConnectionError"], set())
+    msg = str(err)
+    assert "unreachable" in msg and "no network path" in msg
+    assert "RZC_PREFIX" not in msg, "still blaming the product prefix"
+
+
+def test_a_real_listing_with_wrong_files_still_suggests_the_prefix():
+    """The other half: when MeteoSwiss answered and the files are not ours,
+    the prefix really is the thing to check."""
+    err = radar._no_files_error(["20260814-ch=42 assets"],
+                                {"xyz1234.h5", "xyz5678.h5"})
+    msg = str(err)
+    assert "RZC_PREFIX" in msg
+    assert "xyz" in msg, "should report what prefixes were actually present"
+
+
+def test_a_mixed_failure_does_not_claim_the_network_is_down():
+    """One item unreachable and another listing fine is not an outage."""
+    err = radar._no_files_error(
+        ["20260814-ch=radar STAC unreachable: ConnectionError",
+         "20260813-ch=7 assets"], {"abc.h5"})
+    assert "no network path" not in str(err)
+
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     failed = 0

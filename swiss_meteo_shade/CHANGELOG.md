@@ -5,6 +5,77 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.7.2 - 2026-08-14
+
+### Fixed
+
+- **An outage no longer notifies you every few minutes.** When several things
+  fail at once — a home internet outage takes down radar, precipitation,
+  radiation and gust together — each cycle raised four *different* warnings.
+  Deduplication only remembered the single most recent one, so every warning
+  differed from its stored predecessor and read as brand new, on every cycle,
+  for as long as the outage lasted. Roughly **forty notifications an hour** for
+  one problem.
+
+  The recorder now tracks the whole *set* of conditions active in a cycle, and
+  the `event` entities fire only for conditions that were not active in the
+  previous one. A four-fault outage now announces four events **once**.
+  Measured on the regression test: ten cycles of the same outage fired 31
+  events before, 4 after.
+
+  When several *unrelated* conditions are live, `Active warning` shows the
+  newest and counts the rest — *"sunshine forecast unavailable since
+  2026-08-14 13:15Z (+2 more)"*. One sensor cannot carry several messages
+  inside Home Assistant's 255-character state limit, so the full list now
+  travels as an **`active_warnings` attribute** on that sensor (and
+  `active_errors` on the other): the count tells you something is hidden, and
+  the attribute tells you what, without going to the Log.
+
+- **An outage now reports its cause, not its symptoms.** Losing internet makes
+  radar, precipitation, gust and sunshine fail together — four warnings for
+  one fact. When *nothing at all* could be reached, the add-on now says so
+  once:
+
+  > no internet connection — no data source could be reached
+
+  It is inferred from the four attempts already made, not from probing some
+  third-party host: a probe is another request that can fail for its own
+  reasons, and four real attempts are better evidence than one ping. A radar
+  that answers with a *stale* frame counts as reachable, so a MeteoSwiss-side
+  problem is never misreported as your network. Every individual failure is
+  still written to the **Log** — only the sensor and the notification collapse.
+
+- **A fault present at startup is now reported.** The first publish after a
+  start used to seed the tracker and fire nothing, so it wouldn't re-announce
+  an event restored from `/data`. That persistence was removed in 1.5.2, so
+  all the suppression did was guarantee that a fault *already happening* when
+  the add-on started was **never** announced — it never changed afterwards
+  either.
+
+- **A network outage is no longer blamed on MeteoSwiss.** With no route to the
+  internet, the radar reported `No 'rzc' files found … If the product prefix
+  changed, update RZC_PREFIX` — sending you off to check MeteoSwiss's catalogue
+  for a renamed product when the actual cause was DNS. When every attempt
+  failed with a connection error it now says so plainly, and only mentions the
+  prefix when a listing was genuinely retrieved.
+
+- **One redundant warning removed.** *"radiation forecast unavailable →
+  falling back to the sunshine model"* was raised even when the sunshine
+  forecast was equally dead, which during a total outage is a fourth warning
+  describing nothing the other three hadn't said.
+
+### Notes
+
+- **The fail-safe does reach your covers during a total outage**, and now
+  there's a test saying so. When every source fails, `healthy` goes false and
+  the operational entities turn *unavailable* — but that same cycle's decision
+  is `retract: true`, both fail-safes having fired. Because the state is
+  published **before** the availability, Home Assistant sees `Awning unsafe`
+  turn on and runs your automation, and only then marks the entity
+  unavailable. Confirmed against a real outage on 2026-08-14: the awning came
+  in. That ordering was undocumented and untested, and reversing those two
+  lines would have silently removed the protection.
+
 ## 1.7.1 - 2026-08-14
 
 ### Fixed
