@@ -514,6 +514,66 @@ def announce_discovery(client):
     client.publish(_DIAG_AVAIL_TOPIC, "online", retain=True, qos=1)
 
 
+# ---------------------------------------------------------------------------
+# Retiring discovery configs a previous version published
+# ---------------------------------------------------------------------------
+# Publishing the CURRENT entity set does not remove entities an older version
+# published: a retained config stays on the broker until an empty payload
+# retracts it, so Home Assistant recreates the dead entity on every restart,
+# forever. Observed in the field on 2026-08-14 -- an install was carrying five
+# entities from builds predating this repository, including one whose frozen
+# entity_id then attached itself to a NEW entity that reused its unique_id.
+#
+# Nothing here is guessed from a hardcoded list of retired slugs: we read what
+# is actually retained and retract whatever we are no longer publishing.
+DISCOVERY_FILTER = "homeassistant/+/sms_+/config"
+_seen_discovery = {}          # topic -> is this config ours?
+
+
+def discovery_topics():
+    """Every discovery topic THIS version publishes."""
+    return ({f"homeassistant/binary_sensor/sms_{s}/config" for s, *_ in BINARY}
+            | {f"homeassistant/sensor/sms_{s}/config" for s, *_ in SENSORS}
+            | {f"homeassistant/event/sms_{s}/config" for s, *_ in EVENT_ENTITIES})
+
+
+def note_discovery(topic, payload):
+    """Record a retained discovery config seen on the broker.
+
+    A config counts as ours ONLY if its payload names our device. Anything
+    else -- another add-on colliding on the topic pattern, or a payload we
+    cannot parse -- is recorded as not-ours and can never be retracted.
+    Deleting somebody else's entities would be far worse than leaving one dead
+    entity of our own lying around, so every uncertain case fails that way.
+    """
+    if not payload:                  # an empty payload IS a retraction
+        _seen_discovery.pop(topic, None)
+        return
+    try:
+        cfg = json.loads(payload)
+        ident = (cfg.get("device") or {}).get("identifiers") or []
+    except (ValueError, TypeError, AttributeError):
+        _seen_discovery[topic] = False
+        return
+    _seen_discovery[topic] = DEVICE["identifiers"][0] in ident
+
+
+def retire_orphan_discovery(client):
+    """Retract retained configs for entities this version no longer publishes.
+
+    Returns the topics retracted. Safe to call repeatedly: what has already
+    been retracted no longer arrives as a retained message.
+    """
+    ours = discovery_topics()
+    gone = sorted(t for t, mine in _seen_discovery.items()
+                  if mine and t not in ours)
+    for topic in gone:
+        client.publish(topic, "", retain=True, qos=1)
+        print(f"retired stale entity discovery: {topic}", flush=True)
+    _seen_discovery.clear()
+    return gone
+
+
 _event_seen = {"error": None, "warning": None}
 _event_seeded = False
 

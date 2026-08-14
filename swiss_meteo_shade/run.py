@@ -257,6 +257,14 @@ def _apply_credentials(client):
 # credential refresh between cycles.
 _creds_stale = False
 
+# Set by _on_connect when the retained-discovery sweep starts; cleared by the
+# main loop once it has acted. Retained messages arrive within milliseconds of
+# the SUBACK, but waiting a few seconds before retracting anything costs
+# nothing and removes any doubt about having seen the full set -- and seeing
+# LESS than the full set is the safe direction anyway (we simply retract less).
+_discovery_scan_at = None
+_DISCOVERY_SETTLE_S = 10
+
 
 def _on_disconnect(client, userdata, *args):
     """V2/V1-compatible on_disconnect. On an UNEXPECTED drop, flag the main loop
@@ -279,23 +287,59 @@ def _on_connect(client, userdata, flags, reason_code, properties=None):
     `homeassistant/status: online` after a restart, which is the convention for
     integrations to re-announce. Publishing again is idempotent -- the topics
     are retained and the payloads identical."""
+    global _discovery_scan_at
     try:
         shade.announce_discovery(client)
         client.subscribe("homeassistant/status", qos=1)
+        # Subscribing replays every RETAINED discovery config, including ones
+        # left behind by older versions. Collect them here and let the main
+        # loop decide what to retract -- doing it on the network thread would
+        # block delivery of the very messages we are waiting for.
+        client.subscribe(shade.DISCOVERY_FILTER, qos=1)
+        _discovery_scan_at = time.monotonic()
     except Exception as exc:
         print(f"discovery announce failed: {exc}", flush=True)
 
 
 def _on_message(client, userdata, msg):
-    """Re-announce when Home Assistant comes back online."""
+    """Re-announce when Home Assistant comes back online, and collect the
+    retained discovery configs replayed to us on subscribe."""
     try:
-        if msg.topic == "homeassistant/status" and \
-                msg.payload.decode().strip().lower() == "online":
-            print("Home Assistant back online -> re-announcing discovery",
-                  flush=True)
-            shade.announce_discovery(client)
+        if msg.topic == "homeassistant/status":
+            if msg.payload.decode().strip().lower() == "online":
+                print("Home Assistant back online -> re-announcing discovery",
+                      flush=True)
+                shade.announce_discovery(client)
+            return
+        if msg.topic.startswith("homeassistant/") and \
+                msg.topic.endswith("/config"):
+            shade.note_discovery(msg.topic, msg.payload)
     except Exception as exc:
-        print(f"birth-message handling failed: {exc}", flush=True)
+        print(f"message handling failed on {msg.topic}: {exc}", flush=True)
+
+
+def _sweep_stale_discovery(client):
+    """Retract retained discovery for entities we no longer publish.
+
+    Runs on the MAIN loop, not the paho network thread, and only after the
+    replayed retained configs have had time to arrive. Deliberately placed
+    after a SUCCESSFUL cycle: if the add-on cannot even produce a state there
+    is no reason to be deleting entities.
+    """
+    global _discovery_scan_at
+    if _discovery_scan_at is None:
+        return
+    if time.monotonic() - _discovery_scan_at < _DISCOVERY_SETTLE_S:
+        return                       # not settled yet; try again next cycle
+    _discovery_scan_at = None
+    try:
+        gone = shade.retire_orphan_discovery(client)
+        client.unsubscribe(shade.DISCOVERY_FILTER)
+        if gone:
+            print(f"retired {len(gone)} stale entities left by an earlier "
+                  f"version", flush=True)
+    except Exception as exc:
+        print(f"stale-discovery sweep failed: {exc}", flush=True)
 
 
 def connect(client):
@@ -388,6 +432,7 @@ def main():
                              ("recommendation", "retract", "gust_kmh", "sun",
                               "rain", "temp_c", "forecast_source", "on_backup",
                               "forecast_unavailable", "radar_ok", "healthy")}))
+            _sweep_stale_discovery(client)
             backoff = 0
             fails = 0
         except Exception:

@@ -379,10 +379,17 @@ Shade* with all entities (below).
 > *Swiss Meteo Shade Awning unsafe*.
 >
 > Open **Developer Tools → States**, filter on `swiss_meteo_shade`, and use
-> what you actually see. If you would rather have them match, Settings →
-> Devices & Services → Entities → *(pick one)* → **Entity ID** lets you rename
-> the ID — but nothing needs it, and renaming breaks any automation already
-> pointing at the old one.
+> what you actually see.
+>
+> To realign all of them at once: **Settings → Devices & Services → MQTT →
+> Swiss Meteo Shade → ⋮ → Recreate entity IDs**. It lists every rename before
+> you confirm — note them down, because it does **not** update your
+> automations, scripts or dashboards, and a reference to a missing entity
+> fails silently rather than raising.
+>
+> *(Entities left behind by older versions are cleaned up automatically from
+> 1.7.1 onward — that is a separate mechanism, and it cannot fix an ID that no
+> longer matches its name. See the changelog.)*
 
 **Controls (binary):**
 

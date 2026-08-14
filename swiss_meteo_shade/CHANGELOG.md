@@ -5,6 +5,49 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.7.1 - 2026-08-14
+
+### Fixed
+
+- **Entities from older versions no longer haunt your install.** Publishing the
+  current entity set never removed entities an *earlier* version published: a
+  retained discovery config stays on the broker until an empty payload retracts
+  it, so Home Assistant faithfully recreated every long-dead entity on each
+  restart. One install was found carrying five of them, from builds predating
+  this add-on's public release.
+
+  On startup the add-on now reads what is actually retained on the broker and
+  retracts anything it is no longer publishing. There is no hardcoded list of
+  retired names — it compares reality against the current entity set, so it
+  keeps working for every future rename.
+
+  It runs once per connect, after a successful cycle, and **only** retracts a
+  config whose payload names this add-on's device. An entity it cannot
+  positively identify as its own is always left alone: leaving one dead entity
+  is a nuisance, deleting somebody else's is data loss.
+
+  You'll see one line per removal in the **Log**. Nothing to do on your side.
+
+### Notes
+
+- **This does not fix an entity ID that no longer matches its name.** Those two
+  problems look alike and are not: a retained config lives on the *broker*,
+  while an entity ID lives in Home Assistant's *entity registry*. Home
+  Assistant assigns an entity ID once, when it first sees an entity, and keeps
+  it forever even as the name changes underneath — so an entity renamed across
+  versions keeps its original ID.
+
+  To realign them: **Settings → Devices & Services → MQTT → Swiss Meteo Shade →
+  ⋮ → Recreate entity IDs**. It shows exactly what will be renamed before you
+  confirm. **It does not update your automations, scripts or dashboards** — you
+  must edit those yourself, and a reference to a missing entity fails silently
+  rather than raising. Note down the old and new IDs from that dialog before
+  confirming.
+
+  Installs that have been through several versions may see renames such as
+  `..._radar_ok` → `..._radar_data` and `..._forecast_unavailable` →
+  `..._forecast_data`.
+
 ## 1.7.0 - 2026-08-14
 
 ### Fixed

@@ -28,7 +28,8 @@ correct.
 ├── tests/                   conftest + test_logic, test_events, test_events_entity,
 │                            test_radar, test_imports, test_options, test_forecast,
 │                            test_device_link, test_irradiance, test_solar,
-│                            test_sun_model, test_rain_fallback
+│                            test_sun_model, test_rain_fallback, test_entities,
+│                            test_discovery_cleanup
 ├── tools/                   *_probe.py, rain_forensics.py — never shipped
 └── HANDOFF.md               this file
 ```
@@ -65,7 +66,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.7.0. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.7.1. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -242,6 +243,29 @@ day). Do not respond to a repeat report by adding a low-elevation option.
   second standalone `alias:` — a reader who pastes both gets two automations
   firing on the same events with opposite outcomes. This was nearly shipped in
   1.7.0 and caught on review.
+- **Two different stores, and they are constantly confused** (1.7.1):
+  - a **retained discovery config** lives on the *broker*. Publishing the
+    current set never removes an old one — only an empty retained payload
+    retracts it. `retire_orphan_discovery()` does this at startup by comparing
+    what is retained against `discovery_topics()`. Never hardcode a list of
+    retired slugs; the whole point is that it reads reality.
+  - an **entity_id** lives in Home Assistant's *entity registry*, is assigned
+    once at first discovery, and never follows a later name change. Only the
+    user can fix it: MQTT device → ⋮ → **Recreate entity IDs**. The add-on
+    cannot, and must not try (it would silently re-ID everyone's entities).
+
+  `discovery_topics()` MUST stay in step with what `announce_discovery()`
+  publishes or the sweep deletes live entities — `test_discovery_cleanup.py`
+  pins that with a drift test, and the mutation of dropping one domain from it
+  is caught.
+- **The repository does not go back to the beginning.** First commit is
+  2026-07-30; the add-on was built in Claude Chat before that and had been
+  running on the user's box for weeks. So "grep the git history" does NOT
+  prove an entity or option never existed — five entities were found in the
+  field (`on_backup`, `irradiance_awning`, `irradiance_wall`, `last_error`,
+  `last_warning`, under pre-repo slugs) with no trace in git. I asserted twice
+  that something had "never existed" on the strength of a history search; the
+  user was right both times.
 - **Never assert an entity ID or a cover direction as fact.** Both are
   instance-specific and neither is observable from here; asserting them cost
   two wrong calls in one review (2026-08-14). Home Assistant assigns an
@@ -579,7 +603,7 @@ config changes came out of the investigation:
   `Awning unsafe`, and the weather inputs. Diagnostic: source, radar age,
   radar/forecast/gust health, reason, active error/warning, per-source gusts.
 - 23 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 131 across 13 files, all passing; no external deps beyond numpy for
+- Tests: 140 across 14 files, all passing; no external deps beyond numpy for
   the radar ones and astral for the solar ones. `test_entities.py` also carries
   the **manifest guard**: every state-key declared in `BINARY`/`SENSORS` must
   exist in the dict `evaluate()` returns, because a typo there publishes an
