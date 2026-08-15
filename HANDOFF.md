@@ -66,7 +66,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.7.2. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.7.3. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -254,6 +254,18 @@ day). Do not respond to a repeat report by adding a low-elevation option.
   the fail-safe silently never reaches the covers. Confirmed working against a
   real outage on 2026-08-14. `test_entities.py` pins the order; swapping the
   two lines fails it.
+- **Assert against the RULE, not against the string you wrote.** 1.7.1's
+  subscribe used `homeassistant/+/sms_+/config`; MQTT 3.1.1 4.7.1.2 requires a
+  `+` to occupy an entire level, so the client rejected it and the sweep never
+  ran for two releases. The test asserted `DISCOVERY_FILTER == "<that same
+  string>"` -- it could only ever confirm my own typo back to me. It now
+  validates the filter against the spec's rules, and a second test checks the
+  validator rejects the 1.7.1 filter, because a validator that passes
+  everything proves nothing.
+- **One `try` per job.** That failure printed "discovery announce failed"
+  while the announce had succeeded, because a single try wrapped announce +
+  two subscribes -- misnaming the step AND skipping the rest. Wrap each
+  independently and name it in its own message.
 - **Report the CAUSE, not the symptoms.** Losing internet fails radar,
   precipitation, gust and sunshine together; four warnings for one fact is
   noise. `evaluate()` detects "nothing at all answered" and calls
@@ -635,7 +647,7 @@ config changes came out of the investigation:
   `Awning unsafe`, and the weather inputs. Diagnostic: source, radar age,
   radar/forecast/gust health, reason, active error/warning, per-source gusts.
 - 23 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 157 across 14 files, all passing; no external deps beyond numpy for
+- Tests: 160 across 14 files, all passing; no external deps beyond numpy for
   the radar ones and astral for the solar ones. `test_entities.py` also carries
   the **manifest guard**: every state-key declared in `BINARY`/`SENSORS` must
   exist in the dict `evaluate()` returns, because a typo there publishes an

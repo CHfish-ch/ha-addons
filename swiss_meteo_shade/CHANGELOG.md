@@ -5,6 +5,36 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.7.3 - 2026-08-15
+
+### Fixed
+
+- **The 1.7.1 cleanup never actually ran.** It subscribed with the filter
+  `homeassistant/+/sms_+/config`, which is not a legal MQTT filter — the spec
+  requires a `+` to occupy an **entire** level, so it cannot be glued to a
+  prefix. The client rejected it outright and the Log showed:
+
+  ```
+  discovery announce failed: Invalid subscription filter.
+  ```
+
+  So no retained configs were ever collected and nothing was ever retracted.
+  If you updated to 1.7.1 or 1.7.2 and your stale entities are still there,
+  this is why; they will be cleaned on the first cycle after updating to
+  1.7.3.
+
+  The filter is now `homeassistant/+/+/config`. Matching every discovery
+  config rather than only this add-on's costs one burst of retained messages
+  per connect and changes nothing about safety: a config is only ever
+  retracted when its **payload** names this add-on's device, which was always
+  the real guard.
+
+- **That message also named the wrong step.** The announce had already
+  succeeded; it was the subscribe that failed. One `try` wrapped three
+  independent jobs, so any failure was reported as an announce failure and
+  skipped everything after it. Each step now reports itself, and a failed
+  subscribe says plainly that stale entities will not be cleaned up.
+
 ## 1.7.2 - 2026-08-14
 
 ### Fixed

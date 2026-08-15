@@ -288,9 +288,20 @@ def _on_connect(client, userdata, flags, reason_code, properties=None):
     integrations to re-announce. Publishing again is idempotent -- the topics
     are retained and the payloads identical."""
     global _discovery_scan_at
+    # Three independent jobs, each with its own guard. One try block around
+    # all of them meant a failure in the LAST reported "discovery announce
+    # failed" -- naming the step that had already succeeded -- and skipped
+    # whatever came after it. 1.7.1 hit exactly that: an invalid subscription
+    # filter, reported as an announce failure, silently disabling the sweep.
     try:
         shade.announce_discovery(client)
+    except Exception as exc:
+        print(f"discovery announce failed: {exc}", flush=True)
+    try:
         client.subscribe("homeassistant/status", qos=1)
+    except Exception as exc:
+        print(f"subscribe to homeassistant/status failed: {exc}", flush=True)
+    try:
         # Subscribing replays every RETAINED discovery config, including ones
         # left behind by older versions. Collect them here and let the main
         # loop decide what to retract -- doing it on the network thread would
@@ -298,7 +309,8 @@ def _on_connect(client, userdata, flags, reason_code, properties=None):
         client.subscribe(shade.DISCOVERY_FILTER, qos=1)
         _discovery_scan_at = time.monotonic()
     except Exception as exc:
-        print(f"discovery announce failed: {exc}", flush=True)
+        print(f"subscribe to {shade.DISCOVERY_FILTER} failed -- stale entities "
+              f"from older versions will not be cleaned up: {exc}", flush=True)
 
 
 def _on_message(client, userdata, msg):

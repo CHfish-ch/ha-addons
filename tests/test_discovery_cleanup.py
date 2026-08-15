@@ -126,15 +126,60 @@ def test_discovery_topics_matches_what_announce_actually_publishes():
         f"drift: {announced ^ shade.discovery_topics()}"
 
 
+def _valid_mqtt_filter(f):
+    """MQTT 3.1.1 4.7.1.2 / 4.7.1.3, the rules a broker actually enforces:
+    `+` must occupy an ENTIRE level, `#` must be the last level and alone."""
+    if not f or len(f.encode()) > 65535:
+        return False
+    levels = f.split("/")
+    for i, lvl in enumerate(levels):
+        if "+" in lvl and lvl != "+":
+            return False                      # e.g. "sms_+" -- not a wildcard
+        if "#" in lvl and (lvl != "#" or i != len(levels) - 1):
+            return False
+    return True
+
+
+def _matches(f, topic):
+    """Does topic match filter? Single-level wildcards only, which is all we
+    use -- deliberately not a general implementation."""
+    fl, tl = f.split("/"), topic.split("/")
+    return len(fl) == len(tl) and all(a == "+" or a == b
+                                      for a, b in zip(fl, tl))
+
+
+def test_the_subscribe_filter_is_a_LEGAL_mqtt_filter():
+    """1.7.1 shipped `homeassistant/+/sms_+/config`. A `+` glued to a prefix is
+    not a wildcard -- the client rejects the whole filter with "Invalid
+    subscription filter", so the subscribe never happened and the sweep never
+    ran. The previous test asserted the filter equalled the string I had
+    written, which cannot catch that; this one applies the spec's rules."""
+    assert _valid_mqtt_filter(shade.DISCOVERY_FILTER), \
+        f"broker will reject {shade.DISCOVERY_FILTER!r}"
+
+
 def test_the_subscribe_filter_matches_our_own_topics():
     """A filter that misses our namespace would collect nothing and silently
     never clean anything up."""
-    assert shade.DISCOVERY_FILTER == "homeassistant/+/sms_+/config"
     for topic in shade.discovery_topics():
-        parts = topic.split("/")
-        assert len(parts) == 4 and parts[0] == "homeassistant" \
-            and parts[2].startswith("sms_") and parts[3] == "config", \
-            f"{topic} would not be matched by the subscription"
+        assert _matches(shade.DISCOVERY_FILTER, topic), \
+            f"{topic} would not be delivered by {shade.DISCOVERY_FILTER}"
+
+
+def test_the_filter_also_reaches_topics_from_older_versions():
+    """The orphans are the POINT: pre-repository slugs we cannot enumerate."""
+    for topic in ("homeassistant/sensor/sms_last_error/config",
+                  "homeassistant/binary_sensor/sms_on_backup/config",
+                  "homeassistant/event/sms_whatever_we_called_it/config"):
+        assert _matches(shade.DISCOVERY_FILTER, topic), topic
+
+
+def test_the_validator_itself_rejects_the_1_7_1_filter():
+    """Guard the guard: a validator that passes everything proves nothing."""
+    assert not _valid_mqtt_filter("homeassistant/+/sms_+/config")
+    assert not _valid_mqtt_filter("homeassistant/#/config")
+    assert _valid_mqtt_filter("homeassistant/+/+/config")
+    assert _valid_mqtt_filter("homeassistant/#")
 
 
 if __name__ == "__main__":

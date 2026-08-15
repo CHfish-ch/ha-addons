@@ -555,7 +555,16 @@ def announce_discovery(client):
 #
 # Nothing here is guessed from a hardcoded list of retired slugs: we read what
 # is actually retained and retract whatever we are no longer publishing.
-DISCOVERY_FILTER = "homeassistant/+/sms_+/config"
+# MQTT 3.1.1 4.7.1.2: a `+` MUST occupy an ENTIRE level. `sms_+` is therefore
+# not a filter at all -- it is rejected outright by the broker/client, which is
+# how 1.7.1 shipped a sweep that never subscribed and so never ran.
+#
+# Matching every discovery config rather than only ours costs one burst of
+# retained messages per connect and is safe by construction: `note_discovery`
+# marks a config as ours ONLY when its payload names our device, and
+# `retire_orphan_discovery` retracts only those. Filtering by topic was never
+# the safety mechanism.
+DISCOVERY_FILTER = "homeassistant/+/+/config"
 _seen_discovery = {}          # topic -> is this config ours?
 
 
