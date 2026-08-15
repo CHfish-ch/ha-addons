@@ -5,6 +5,46 @@ behaviour now differs), **Fixed** (a bug), and **Notes** (something worth
 checking on your side — often not a code change at all). Anything that can
 alter how your covers move is called out explicitly.
 
+## 1.7.4 - 2026-08-15
+
+### Fixed
+
+- **Raising `gust_limit_kmh` didn't release an awning already held in.**
+  *This affects how your covers move.*
+
+  The hysteresis latch records one fact — *the gust reached your limit* — and
+  it is deliberately persisted across restarts so that a restart mid-storm
+  doesn't drop back to the extend side of the band. But it was stored as a
+  bare `true`, with no record of **which limit it was earned under**. Raise
+  the limit and the latch keeps asserting a crossing that never happened at
+  the new setting, holding the awning in until the gust falls below
+  `gust_release_kmh` — which can be a long way down, and a long time.
+
+  Reported: retracted at `gust_limit_kmh: 40`, limit raised to `50`, add-on
+  restarted, retracted again at 41.8 km/h.
+
+  The latch is now stored **with the thresholds in force when it was earned**,
+  and discarded if either has changed since — the next forecast re-derives it.
+  Changing a threshold is you telling the add-on the rule is different, so the
+  old verdict cannot carry over. Restarting without changing anything behaves
+  exactly as before.
+
+  You'll see one Log line when it happens:
+
+  ```
+  gust thresholds changed since the wind latch was saved
+  (limit 40.0 -> 50.0, release 40.0 -> 40.0)
+  -> latch discarded and re-derived from the current forecast
+  ```
+
+### Notes
+
+- The stored latch has no thresholds in it until this release, so the **first
+  start after updating discards whatever was saved** and re-derives it from
+  the current forecast. If a gust above your limit is in the outlook it
+  re-latches on that first cycle; the only case that changes is a gust sitting
+  *between* release and limit, which is exactly the case that was stuck.
+
 ## 1.7.3 - 2026-08-15
 
 ### Fixed

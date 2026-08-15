@@ -66,7 +66,7 @@ so the 18 acceptance cases run with a bare interpreter.
 
 A Home Assistant **add-on** (not an integration, not HACS-installable) that turns
 MeteoSwiss open data into awning/blind recommendations published over MQTT
-discovery. Slug `swiss_meteo_shade`, version 1.7.3. Runs on the user's own HA OS
+discovery. Slug `swiss_meteo_shade`, version 1.7.4. Runs on the user's own HA OS
 box; Switzerland only.
 
 Three signals feed one decision:
@@ -254,6 +254,15 @@ day). Do not respond to a repeat report by adding a low-elevation option.
   the fail-safe silently never reaches the covers. Confirmed working against a
   real outage on 2026-08-14. `test_entities.py` pins the order; swapping the
   two lines fails it.
+- **Persisted state must record the CONFIG it was derived under** (1.7.4).
+  The hysteresis latch is a claim -- "the gust reached gust_limit_kmh" -- and a
+  claim is only meaningful against the threshold that produced it. Stored as a
+  bare bool, it survived a limit change and kept holding the awning in at a
+  gust the user had just declared safe (reported 2026-08-15: latched at 40,
+  limit raised to 50, retracted again at 41.8). `/data/wind_high.json` now
+  carries `gust_limit`/`gust_release` and the latch is discarded when either
+  moved. Persisting across a RESTART is still correct (A2); persisting across
+  a CONFIG CHANGE never was. Applies to any future persisted decision.
 - **Assert against the RULE, not against the string you wrote.** 1.7.1's
   subscribe used `homeassistant/+/sms_+/config`; MQTT 3.1.1 4.7.1.2 requires a
   `+` to occupy an entire level, so the client rejected it and the sweep never
@@ -647,7 +656,7 @@ config changes came out of the investigation:
   `Awning unsafe`, and the weather inputs. Diagnostic: source, radar age,
   radar/forecast/gust health, reason, active error/warning, per-source gusts.
 - 23 config options, all documented in `README.md` **and** `translations/en.yaml`.
-- Tests: 160 across 14 files, all passing; no external deps beyond numpy for
+- Tests: 167 across 14 files, all passing; no external deps beyond numpy for
   the radar ones and astral for the solar ones. `test_entities.py` also carries
   the **manifest guard**: every state-key declared in `BINARY`/`SENSORS` must
   exist in the dict `evaluate()` returns, because a typo there publishes an

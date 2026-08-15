@@ -43,17 +43,49 @@ def _log(msg):
 
 
 def _load_wind_high():
+    """Restore the hysteresis latch -- but only if it still MEANS anything.
+
+    The latch records one fact: "the gust reached gust_limit_kmh". That fact
+    is only meaningful for the limit it was earned under. Raise the limit from
+    40 to 50 and a latch earned at 41 km/h now asserts a crossing that never
+    happened under the new setting, so the awning is held in at a gust the
+    user has just declared safe -- and it stays held until the gust falls
+    below gust_release, which may be a long way down.
+
+    Reported 2026-08-15: retracted at limit 40, limit raised to 50, add-on
+    restarted, retracted again at 41.8 km/h.
+
+    Persisting across a RESTART is still right (A2) -- a restart mid-storm
+    must not drop back to the extend side of the band. Persisting across a
+    CONFIG CHANGE is not: the user has just said the threshold is different,
+    so the latch is discarded and re-derived from the next forecast.
+    """
     try:
         with open(_WIND_STATE_FILE) as fh:
-            return bool(json.load(fh).get("wind_high", False))
+            saved = json.load(fh)
     except (OSError, ValueError):
         return False
+    # A file written before 1.7.4 carries no thresholds, so it reads as
+    # changed and is discarded once. That is the intended migration.
+    if (saved.get("gust_limit") != shade.GUST_LIMIT_KMH
+            or saved.get("gust_release") != shade.GUST_RELEASE_KMH):
+        _log(f"gust thresholds changed since the wind latch was saved "
+             f"(limit {saved.get('gust_limit')} -> {shade.GUST_LIMIT_KMH}, "
+             f"release {saved.get('gust_release')} -> "
+             f"{shade.GUST_RELEASE_KMH}) -> latch discarded and re-derived "
+             f"from the current forecast")
+        return False
+    return bool(saved.get("wind_high", False))
 
 
 def _save_wind_high(value):
+    """Store the latch WITH the thresholds it was earned under, so a later
+    config change can tell that it no longer applies."""
     try:
         with open(_WIND_STATE_FILE, "w") as fh:
-            json.dump({"wind_high": bool(value)}, fh)
+            json.dump({"wind_high": bool(value),
+                       "gust_limit": shade.GUST_LIMIT_KMH,
+                       "gust_release": shade.GUST_RELEASE_KMH}, fh)
     except OSError:
         pass
 
@@ -419,8 +451,13 @@ def main():
           + f" | every {shade.INTERVAL_SECONDS}s", flush=True)
 
     # A2: hysteresis state persists across restarts so a mid-storm restart does
-    # not drop back to the extend side of the band.
+    # not drop back to the extend side of the band -- but NOT across a change
+    # to the thresholds it was earned under; see _load_wind_high.
     prev_wind_high = _load_wind_high()
+    # Re-stamp immediately with the thresholds now in force. The loop only
+    # saves when the value CHANGES, so without this a discarded latch would be
+    # discarded again on every restart and log the change every time.
+    _save_wind_high(prev_wind_high)
     backoff = 0
     fails = 0
     while not _stop:
